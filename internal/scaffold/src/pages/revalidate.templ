@@ -1,0 +1,50 @@
+package pages
+
+import (
+	"{{.GoModName}}/src/layouts"
+	"time"
+	routes "github.com/gothicframework/core/router"
+    "net/http"
+)
+
+/**
+ * `RevalidateProps` defines the data (props) that this page receives from the middleware.
+ * In this case, we’re passing a `time.Time` value that will be displayed in the page.
+ */
+type RevalidateProps = time.Time
+
+
+/**
+ * `RevalidateConfig` defines the configuration for this ISR-enabled route.
+ *
+ * - `Type`: Set to `ISR` (Incremental Static Regeneration), allowing the page to be statically generated
+ *   and then revalidated in the background every `RevalidateInSec` seconds.
+ * - `HttpMethod`: Sets the HTTP method this page responds to (in this case, GET).
+ * - `Middleware`: Runs server-side to generate the props (`RevalidateProps`) for the page.
+ * - `RevalidateInSec`: Specifies the revalidation interval in seconds (every 10 seconds).
+ *
+ * Cache backend is configured in main.go via gothicRoutes.Setup().
+ * Default: CACHE_CONTROL_HEADERS in production, in-memory during development (hot-reload).
+ */
+var RevalidateConfig = routes.RouteConfig[RevalidateProps]{
+	Type:          routes.ISR,
+	HttpMethod:    routes.GET,
+	Middleware: func(w http.ResponseWriter, r *http.Request) RevalidateProps {
+		return time.Now()
+	},
+	RevalidateInSec: 10, // Revalidate this page every 10 seconds
+}
+
+/**
+ * `Revalidate` is the actual page component, rendered with the props returned by the middleware.
+ *
+ * The current server time is displayed in RFC3339 format, showcasing that the page updates at intervals.
+ */
+templ Revalidate(currentTime RevalidateProps) {
+	@layouts.PageLayout() {
+		<div class="flex flex-col justify-center items-center w-screen h-screen">
+			<h1 class="text-4xl mb-5 text-white">ISR Feature with GOTH APP</h1>
+			<span class="font-bold text-white">{ currentTime.Format(time.RFC3339) }</span>
+		</div>
+	}
+}

@@ -1,0 +1,170 @@
+//go:build js && wasm
+// Code generated from {{.SourceFile}} — DO NOT EDIT.
+
+package main
+
+import (
+	. "wasm-runtime/runtime"
+{{range .StdImports}}	{{.}}
+{{end}})
+
+// ── auto-generated codecs (do not edit) ─────────────────────────────────
+{{range .Codecs}}
+func _encode_{{.Name}}(v {{.Name}}, e *Encoder) {
+{{range .Fields}}	{{.EncLine}}
+{{end}}}
+
+func _decode_{{.Name}}(d *Decoder) {{.Name}} {
+	var v {{.Name}}
+{{range .Fields}}	{{.DecLine}}
+{{end}}	return v
+}
+
+func _encode_slice{{.Name}}(v []{{.Name}}, e *Encoder) {
+	e.U32(uint32(len(v)))
+	for _, _item := range v { _encode_{{.Name}}(_item, e) }
+}
+
+func _decode_slice{{.Name}}(d *Decoder) []{{.Name}} {
+	_n := int(d.U32())
+	v := make([]{{.Name}}, _n)
+	for _i := range v { v[_i] = _decode_{{.Name}}(d) }
+	return v
+}
+{{end}}
+{{range .KeyVars}}var {{.StructName}}Key = BinaryKey("{{.KeyName}}", _encode_{{.StructName}}, _decode_{{.StructName}})
+
+{{end}}
+{{range .TopicTypes}}type {{.TypeName}} struct {
+{{range .Fields}}	{{.Name}} *ObservableField[{{.Type}}]
+{{end}}	_online  bool
+	// _seeded is false until _broadcastAll has force-sent every field once. It
+	// is reset to false whenever the core (re)announces online so a late/rejoined
+	// core is hydrated with every field, even ones that never change.
+	_seeded  bool
+	_pending string
+	// _lastSent<Field> holds the last value SENT for each field. _broadcastAll
+	// compares against these to skip re-encoding + re-broadcasting an unchanged
+	// field (the per-toggle whole-struct re-encode that ratcheted the heap).
+{{range .Fields}}	_lastSent{{.Name}} {{.Type}}
+{{end}}}
+
+{{end}}
+{{range .WasmFuncs}}{{$fn := .}}func {{.CtorName}}(initial ...{{.StructName}}) *{{.TypeName}} {
+	topic := &{{.TypeName}}{
+{{range .Fields}}		{{.Name}}: NewObservableField({{$fn.StructName}}{}.{{.Name}}),
+{{end}}		_pending: "",
+	}
+	// Schema seam (Phase 15): register this topic's reserved wire descriptor at
+	// the consumer registration point. Interpreted by nothing in v3.0.
+	GothicRegisterSchema("{{.KeyName}}", "{{.SchemaID}}", {{.SchemaDescriptorLit}})
+{{range .FieldCodecs}}	topic.{{.FieldName}}.SetBroadcast(func() {
+		if !topic._online {
+			return
+		}
+		v := {{$fn.StructName}}{ {{.FieldName}}: topic.{{.FieldName}}.Peek() }
+		e := NewEncoder(8)
+		{{.EncLines}}
+		// Per-field broadcast: hand bytes straight to the data-plane (no
+		// string()->[]byte round-trip). Matches _broadcastAll; keeps heavy
+		// (e.g. blob) per-field Set() off the worst-case 3x-copy path.
+		RequestTopicSetFieldBytes("{{$fn.KeyName}}", "{{.FieldName}}", e.Buf)
+	})
+{{end}}{{range .FieldCodecs}}	ListenTopicEventField("{{$fn.KeyName}}", "{{.FieldName}}", func(detail []byte) {
+		d := NewDecoder(detail)
+		var v {{$fn.StructName}}
+		{{.DecLines}}
+		topic.{{.FieldName}}.ApplyExternal(v.{{.FieldName}})
+	})
+{{end}}	// Phase 17 two-tier protocol. The per-topic MANAGER WASM is gone; the
+	// always-loaded full-Go static core is the generic hub. The per-field frames
+	// above (RequestTopicSetField / ListenTopicEventField) are the BINARY
+	// DATA-PLANE — the core store-and-forwards them opaquely by key+field, never
+	// decoding a byte. Below is the JSON/string CONTROL-PLANE: a per-key online
+	// ack from the core flips _online (and flushes any pending whole-struct Set,
+	// fanned out per-field), and the register handshake hands the core this
+	// topic's key + field names so it can subscribe + replay current state.
+	//
+	// Online hydration is per-field REPLAY: on (re)join the core re-broadcasts each
+	// stored field frame (handled by the ListenTopicEventField handlers above),
+	// THEN announces this ack — so all fields are applied before _online flips.
+	ListenTopicCoreOnline("{{$fn.KeyName}}", func() {
+		if !topic._online {
+			topic._online = true
+			// Force the next _broadcastAll to re-send EVERY field so a core that
+			// just (re)joined hydrates its full state, including never-changing
+			// fields the per-field change detection would otherwise skip.
+			topic._seeded = false
+			if topic._pending != "" {
+				_pv := _decode_{{$fn.StructName}}(NewDecoder([]byte(topic._pending)))
+				topic._broadcastAll(_pv)
+				topic._pending = ""
+			}
+		}
+	})
+	RegisterTopicWithCore("{{$fn.KeyName}}", []string{ {{range .Fields}}"{{.Name}}", {{end}} })
+	return topic
+}
+
+// _broadcastAll fans a whole-struct value out over the binary DATA-PLANE, one
+// per-field set-request each (RequestTopicSetFieldBytes). There is NO whole-struct
+// wire path any more: the core is opaque and never slices a struct frame, so the
+// component itself is the only place that knows the field layout. The core
+// stores + byte-diffs + rebroadcasts each field independently.
+//
+// PER-FIELD CHANGE DETECTION: each field is encoded + sent only when it actually
+// changed since the last send (or when !_seeded forces a full send — first
+// broadcast and every core (re)join). Comparing v.<Field> against the
+// _lastSent<Field> holder means a 1-byte sibling toggle no longer re-encodes and
+// re-broadcasts an untouched multi-MB field — the transient buffer that TinyGo's
+// conservative no-shrink GC was false-pinning and ratcheting into linear memory.
+// The send passes e.Buf directly (RequestTopicSetFieldBytes) to skip the
+// string(e.Buf)→[]byte round-trip on the fields that DO change.
+func (c *{{.TypeName}}) _broadcastAll(v {{.StructName}}) {
+{{range .FieldCodecs}}	if !c._seeded || ({{.ChangedExpr}}) {
+		e := NewEncoder(8)
+		{{.EncLines}}
+		RequestTopicSetFieldBytes("{{$fn.KeyName}}", "{{.FieldName}}", e.Buf)
+		c._lastSent{{.FieldName}} = v.{{.FieldName}}
+	}
+{{end}}	c._seeded = true
+}
+
+func (c *{{.TypeName}}) Set(v {{.StructName}}) {
+	if c._online {
+		c._broadcastAll(v)
+	} else {
+		// Defer until the core acks online, then fan out per-field. Held as the
+		// encoded whole struct purely as a compact pending buffer; it is decoded
+		// and fanned out on flush — it never crosses the wire whole.
+		e := NewEncoder(64)
+		_encode_{{$fn.StructName}}(v, e)
+		c._pending = string(e.Buf)
+	}
+}
+
+{{end}}
+{{range .TopicSnippets}}
+{{.}}
+
+{{end}}
+{{range .Helpers}}
+{{.}}
+
+{{end}}
+func main() {
+{{if .Multiplexed}}	// Multiplexed route: register the ClientSideState body as a per-scope factory
+	// so ONE instance serves every placement of this component type. The body is
+	// re-run under each registered scope (bootstrap scope now, subsequent scopes
+	// via __gothic_register_scope), giving every placement its own observables.
+	GothicRegisterScope(func() {
+{{.Body}}	})
+{{else}}{{.Body}}{{end}}
+	// Haltable keep-alive: block until the bootstrap's per-scope teardown calls
+	// the exported __gothic_halt (which closes GothicHaltChan), then return so
+	// this instance's goroutine ends and its linear memory becomes collectible.
+	select {
+	case <-GothicHaltChan():
+		return
+	}
+}

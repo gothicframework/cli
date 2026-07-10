@@ -1,0 +1,78 @@
+package main
+
+import (
+	gothic "github.com/gothicframework/core/config"
+)
+
+var Config = gothic.Config{
+	ProjectName: "{{.ProjectName}}",
+	// TofuBinaryPath: "", // optional: absolute path to tofu binary override
+	// DockerfilePath: "", // optional: absolute path to custom Dockerfile
+	// WasmBinary:     "", // optional: absolute path to tinygo binary override
+	// TailwindBinary: "", // optional: absolute path to tailwind binary override
+	OptimizeImages: gothic.OptimizeImagesConfig{
+		LowResolutionRate: 20,
+	},
+	// Runtime configures the router that main.go hands to gothicServer.Middleware.
+	// The zero value is the default below, so you can delete this block entirely.
+	//
+	//   CacheStrategy: production cache backend.
+	//     CACHE_CONTROL_HEADERS (default) | IN_MEMORY | REDIS | LOCAL_FILES
+	//   LocalDevelopmentCache: cache backend used during hot reload.
+	//     IN_MEMORY (default) | REDIS | LOCAL_FILES
+	//   ServeStaticFiles: when /public/* is served from disk.
+	//     HOT_RELOAD_ONLY (default): only in dev; in prod CloudFront serves from S3.
+	//     ALL_ENVS: always from disk (the public folder must ship with the binary).
+	//   CacheConfig: optional backend settings (Redis URL, compression, ...).
+	Runtime: gothic.RuntimeConfig{
+		CacheStrategy:         gothic.CACHE_CONTROL_HEADERS,
+		LocalDevelopmentCache: gothic.IN_MEMORY,
+		ServeStaticFiles:      gothic.HOT_RELOAD_ONLY,
+	},
+	Deploy: &gothic.DeployConfig{
+		ServerMemory:  512,
+		ServerTimeout: 30,
+		Region:        "us-east-1",
+		Profile:       "default",
+		Stages: map[string]gothic.Stage{
+			"dev": {
+				// Custom domain (optional). These 4 fields are source-aware like ENV:
+				// use gothic.Env("literal"), gothic.SSMParam("/path") or
+				// gothic.SecretsManager("/path") so a domain or ARN is pulled at
+				// deploy time instead of being committed in plain text.
+				//
+				// Set CustomDomain + HostedZoneId and Gothic creates + DNS-validates
+				// the ACM certificate for you, in us-east-1, regardless of the stack's
+				// Region — no CertificateArn needed. Provide CertificateArn only to
+				// reuse an existing us-east-1 certificate instead.
+				// CustomDomain: gothic.SSMParam("/myapp/dev/domain"),
+				// HostedZoneId: gothic.SSMParam("/myapp/dev/hosted-zone-id"),
+				// CertificateArn: gothic.SecretsManager("/myapp/dev/cert-arn"), // optional (BYO)
+				// WafArn:         gothic.SSMParam("/myapp/dev/waf-arn"),         // optional
+				ENV: map[string]gothic.EnvValue{
+					// "PORT":     gothic.Env("8080"),
+					// "DB_URL":   gothic.SSMParam("/myapp/dev/db-url"),
+					// A Secrets Manager secret is usually a JSON object; use .Get to pull a
+					// single field so the env var receives the value, not the whole JSON:
+					// "API_KEY":  gothic.SecretsManager("/myapp/dev/api-key").Get("secret-key"),
+					// Omit .Get when the secret/parameter stores a plain string:
+					// "API_KEY":  gothic.SecretsManager("/myapp/dev/api-key"),
+				},
+			},
+		},
+	},
+}
+
+// Lifecycle hooks fire around `gothic deploy`. To enable one, uncomment it and
+// add `"context"` plus `"github.com/gothicframework/core/config"`
+// (already imported above as `gothic`) to your imports.
+//
+// BeforeDeploy runs synchronously before tofu apply. Return an error to abort.
+// func BeforeDeploy(ctx context.Context, gctx *gothic.GothicContext) error {
+// 	return nil
+// }
+//
+// AfterDeploy runs after tofu apply and S3 sync complete. gctx.Outputs is populated.
+// func AfterDeploy(ctx context.Context, gctx *gothic.GothicContext) error {
+// 	return nil
+// }

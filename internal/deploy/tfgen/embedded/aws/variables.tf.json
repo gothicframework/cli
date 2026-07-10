@@ -1,0 +1,74 @@
+{
+  "variable": {
+    "project_name": {
+      "type": "string",
+      "description": "The Gothic project name; used as a base for all resource names."
+    },
+    "stage": {
+      "type": "string",
+      "description": "The deployment stage (e.g. dev, prod)."
+    },
+    "suffix": {
+      "type": "string",
+      "description": "Deterministic resource suffix derived from the Go module name."
+    },
+    "region": {
+      "type": "string",
+      "description": "The AWS region to deploy into."
+    },
+    "profile": {
+      "type": "string",
+      "description": "The AWS shared-config profile to use.",
+      "default": ""
+    },
+    "server_memory": {
+      "type": "number",
+      "description": "Lambda function memory size in MB."
+    },
+    "server_timeout": {
+      "type": "number",
+      "description": "Lambda function timeout in seconds."
+    },
+    "ecr_image_uri": {
+      "type": "string",
+      "description": "The full ECR image URI (including tag) for the Lambda container image. Supplied at apply time via gothic_image.auto.tfvars.json once the image is built+pushed; defaults to empty so init/validate/destroy don't require it.",
+      "default": ""
+    },
+    "bucket_name": {
+      "type": "string",
+      "description": "The S3 bucket name for static assets."
+    },
+    "lambda_name": {
+      "type": "string",
+      "description": "The Lambda function name."
+    },
+    "state_bucket": {
+      "type": "string",
+      "description": "The S3 bucket holding the OpenTofu remote state."
+    },
+    "lock_table": {
+      "type": "string",
+      "description": "The DynamoDB table used for OpenTofu state locking."
+    },
+    "enable_custom_domain": {
+      "type": "bool",
+      "description": "Whether this stage serves a custom domain. It switches CloudFront to the custom aliases + ACM viewer certificate (either the managed cert this stack creates, or a BYO local.certificate_arn). local.custom_domain is resolved from raw/SSM/Secrets.",
+      "default": false
+    },
+    "enable_managed_cert": {
+      "type": "bool",
+      "description": "Whether Gothic creates + DNS-validates the ACM certificate itself (CustomDomain + HostedZoneId set, no BYO CertificateArn). The certificate is created in us-east-1 via the aws.us_east_1 provider alias so it works regardless of the stack's region; when false and a custom domain is served, local.certificate_arn (a BYO cert) is used instead.",
+      "default": false
+    },
+    "enable_route53": {
+      "type": "bool",
+      "description": "Whether to create the Route53 alias A record (custom domain served AND a HostedZoneId provided). DNS managed outside AWS leaves this false while enable_custom_domain stays true.",
+      "default": false
+    },
+    "enable_waf": {
+      "type": "bool",
+      "description": "Whether this stage declares a WAFv2 Web ACL ARN. It gates the count of the WAF association; the ARN VALUE is resolved into local.waf_arn.",
+      "default": false
+    }
+  }
+}

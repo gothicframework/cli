@@ -1,0 +1,192 @@
+//go:build js && wasm
+// Code generated for topic manager — DO NOT EDIT.
+
+package main
+
+import (
+	. "wasm-runtime/runtime"
+{{- if .HasTime}}
+	"time"
+{{- end}}
+)
+
+// ── auto-generated codecs (do not edit) ─────────────────────────────────
+{{range .Codecs}}
+func _encode_{{.Name}}(v {{.Name}}, e *Encoder) {
+{{range .Fields}}	{{.EncLine}}
+{{end}}}
+
+func _decode_{{.Name}}(d *Decoder) {{.Name}} {
+	var v {{.Name}}
+{{range .Fields}}	{{.DecLine}}
+{{end}}	return v
+}
+
+func _encode_slice{{.Name}}(v []{{.Name}}, e *Encoder) {
+	e.U32(uint32(len(v)))
+	for _, _item := range v { _encode_{{.Name}}(_item, e) }
+}
+
+func _decode_slice{{.Name}}(d *Decoder) []{{.Name}} {
+	_n := int(d.U32())
+	v := make([]{{.Name}}, _n)
+	for _i := range v { v[_i] = _decode_{{.Name}}(d) }
+	return v
+}
+{{end}}
+{{range .TopicSnippets}}
+{{.}}
+
+{{end}}
+// ── Per-field capture helpers ────────────────────────────────────────────────
+// Each _capture<FieldName>(d) advances d past the field without decoding into a
+// receiver struct, and returns a copy of the consumed bytes. Used to slice the
+// incoming whole-struct payload into per-field byte slices without allocating
+// a full decoded struct (which can be huge for large slices/maps).
+{{range .Fields}}
+func _capture{{.FieldName}}(d *Decoder) []byte {
+	{{.CaptureBody}}
+}
+{{end}}
+
+var _fields = map[string][]byte{}
+var _lastWholeEncoded []byte
+var _wholeDirty bool
+
+// _rebuildWhole concatenates all per-field byte slices into _lastWholeEncoded
+// and re-anchors _fields[] into the freshly allocated buffer so the previous
+// per-field source buffers can be GC'd. Without the re-anchor step, each
+// _fields[] slice could keep a different older buffer alive (e.g. a 5 MB image
+// buffer survives even after _lastWholeEncoded is reassigned), causing TinyGo
+// heap pressure and `unreachable` traps under stress.
+func _rebuildWhole() {
+	total := 1 // WireVersion header byte
+{{range .Fields}}	total += len(_fields["{{.FieldName}}"])
+{{end}}	buf := make([]byte, 0, total)
+	buf = append(buf, WireVersion) // open the frame
+{{range .Fields}}	buf = append(buf, _fields["{{.FieldName}}"]...)
+{{end}}	_lastWholeEncoded = buf
+	// Re-slice _fields[] into the new buffer so all per-field references share
+	// a single underlying allocation. Drops references to the old source bufs.
+	_captureAllFields(_lastWholeEncoded)
+	_wholeDirty = false
+}
+
+// _ensureWholeFresh rebuilds _lastWholeEncoded lazily, only when something is
+// about to read it. Per-field SetReq handlers only mark the whole buffer dirty
+// to avoid allocating a fresh concatenation on every click — under stress with
+// large fields (e.g. a 5 MB image), eager rebuild produces enough garbage to
+// outpace TinyGo's GC and trip the wasm `unreachable` trap.
+func _ensureWholeFresh() {
+	if _wholeDirty {
+		_rebuildWhole()
+	}
+}
+
+// _captureAllFields walks detail once and slices it into _fields[] entries.
+// detail must remain live for the lifetime of those slices — store it in
+// _lastWholeEncoded so subsequent broadcasts/pings reuse the same buffer.
+func _captureAllFields(detail []byte) {
+	// detail is a complete wire frame — NewDecoder skips its WireVersion header
+	// so each _capture returns the raw (version-less) bytes of a single field.
+	d := NewDecoder(detail)
+{{range .Fields}}	_fields["{{.FieldName}}"] = _capture{{.FieldName}}(d)
+{{end}}}
+
+// _frame wraps raw, version-less field bytes in a WireVersion header, producing
+// a self-describing per-field wire frame that consumers decode via NewDecoder.
+// _fields[] always holds RAW field bytes (so _rebuildWhole can concatenate them
+// into a single frame body); every value that crosses the wire is (re)framed here.
+func _frame(raw []byte) string {
+	out := make([]byte, 0, len(raw)+1)
+	out = append(out, WireVersion)
+	out = append(out, raw...)
+	return string(out)
+}
+
+func _bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) { return false }
+	for i := range a { if a[i] != b[i] { return false } }
+	return true
+}
+
+func _registerListeners() {
+	ListenTopicSetReq("{{.KeyName}}", func(detail string) {
+		// Walk the payload field-by-field with the capture helpers instead of
+		// _decode_{{.StructName}}. The win is that we RETAIN only subslices of the
+		// incoming buffer per field — never a decoded struct — so per-field state
+		// doesn't accumulate copies of large fields. Note: capturing a slice/map
+		// field still allocates transiently during the walk (those allocations are
+		// immediately discarded and GC-reclaimed); only []byte and scalar fields
+		// are truly zero-copy. See captureLines in wasm_codec.go.
+		incoming := []byte(detail)
+		d := NewDecoder(incoming)
+{{range .Fields}}		{
+			nb := _capture{{.FieldName}}(d)
+			if !_bytesEqual(nb, _fields["{{.FieldName}}"]) {
+				cp := append([]byte(nil), nb...)
+				_fields["{{.FieldName}}"] = cp
+				BroadcastTopicEncodedField("{{$.KeyName}}", "{{.FieldName}}", _frame(cp))
+				_wholeDirty = true
+			}
+		}
+{{end}}		// Update the JS store so late-joining consumers see fresh data via
+		// ReadTopicStore — but do NOT dispatch gothic:topic-online here. Dispatching
+		// on every click would trigger ListenTopicOnline in all consumer WASMs,
+		// which allocates the full struct bytes (potentially hundreds of KB for
+		// large slices) on every click. Consumers get per-field events instead;
+		// the full online ack is sent on pings only.
+		if _wholeDirty {
+			_ensureWholeFresh()
+			UpdateTopicOnlineStore("{{.KeyName}}", _lastWholeEncoded)
+		}
+	})
+{{range .Fields}}	ListenTopicSetReqField("{{$.KeyName}}", "{{.FieldName}}", func(detail string) {
+		// detail is a per-field wire frame — strip its WireVersion header so
+		// _fields[] keeps only raw field bytes, then re-frame for the broadcast.
+		raw := append([]byte(nil), _capture{{.FieldName}}(NewDecoder([]byte(detail)))...)
+		_fields["{{.FieldName}}"] = raw
+		BroadcastTopicEncodedField("{{$.KeyName}}", "{{.FieldName}}", _frame(raw))
+		// Defer the whole-struct rebuild until something actually reads it.
+		_wholeDirty = true
+	})
+{{end}}}
+
+func _broadcastOnline() {
+	_ensureWholeFresh()
+	BroadcastTopicOnline("{{.KeyName}}", string(_lastWholeEncoded))
+}
+
+// ── schema seam (Phase 15) ───────────────────────────────────────────────────
+// A compact, content-hashed descriptor of this topic's wire shape, reserved for
+// a future generic interpreter. NOTHING interprets it in v3.0 — it is registered
+// opaquely at startup (off the data-plane) via GothicRegisterSchema.
+const _gothicSchemaID = "{{.SchemaID}}"
+const _gothicSchemaDescriptor = {{.SchemaDescriptorLit}}
+
+func main() {
+	// Register the reserved wire descriptor at the topic-registration point.
+	GothicRegisterSchema("{{.KeyName}}", _gothicSchemaID, _gothicSchemaDescriptor)
+	if stored, ok := ReadTopicStore("{{.KeyName}}"); ok {
+		b := []byte(stored)
+		_lastWholeEncoded = b
+		_captureAllFields(b)
+	} else {
+		// Build the zero-value encoded form once, then slice it into _fields.
+		var v {{.StructName}}
+		e := NewEncoder(64)
+		_encode_{{.StructName}}(v, e)
+		_lastWholeEncoded = e.Buf
+		_captureAllFields(_lastWholeEncoded)
+	}
+	_registerListeners()
+	ListenTopicPing("{{.KeyName}}", func() { _broadcastOnline() })
+	_broadcastOnline()
+	// Haltable keep-alive: block until the bootstrap's per-scope teardown calls
+	// the exported __gothic_halt (which closes GothicHaltChan), then return so
+	// this instance's goroutine ends and its linear memory becomes collectible.
+	select {
+	case <-GothicHaltChan():
+		return
+	}
+}

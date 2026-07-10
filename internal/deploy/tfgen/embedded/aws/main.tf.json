@@ -1,0 +1,32 @@
+{
+  "terraform": {
+    "required_providers": {
+      "aws": {
+        "source": "hashicorp/aws",
+        "version": "~> 5.0"
+      }
+    },
+    "backend": {
+      "s3": {
+        "bucket": "${var.state_bucket}",
+        "key": "gothic/${var.project_name}/${var.stage}/terraform.tfstate",
+        "region": "${var.region}",
+        "dynamodb_table": "${var.lock_table}",
+        "encrypt": true
+      }
+    }
+  },
+  "provider": {
+    "aws": [
+      {
+        "region": "${var.region}",
+        "profile": "${var.profile}"
+      },
+      {
+        "alias": "us_east_1",
+        "region": "us-east-1",
+        "profile": "${var.profile}"
+      }
+    ]
+  }
+}

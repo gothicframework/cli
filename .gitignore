@@ -1,0 +1,10 @@
+# OS / editor cruft
+.DS_Store
+*~
+*.swp
+
+# built binary + Go artifacts
+/gothic
+/vendor/
+*.test
+coverage.out
