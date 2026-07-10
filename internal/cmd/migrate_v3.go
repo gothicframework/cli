@@ -44,9 +44,6 @@ const (
 	coreModulePath        = "github.com/gothicframework/core"
 	componentsModulePath  = "github.com/gothicframework/components"
 	middlewaresModulePath = "github.com/gothicframework/middlewares"
-	// runtimeModuleVersion is the published version of the suffixless runtime
-	// modules (core/components/middlewares are all v1.0.0; only the cli keeps /v3).
-	runtimeModuleVersion = "v1.0.0"
 )
 
 // frameworkSubpathMap maps an OLD framework package subpath (the suffix after
@@ -146,14 +143,17 @@ func rewriteV2ToV3GoMod(path string, content []byte) error {
 		}
 	}
 	if dropped {
-		if err := mf.AddRequire(coreModulePath, runtimeModuleVersion); err != nil {
-			return err
-		}
-		if err := mf.AddRequire(componentsModulePath, runtimeModuleVersion); err != nil {
-			return err
-		}
-		if err := mf.AddRequire(middlewaresModulePath, runtimeModuleVersion); err != nil {
-			return err
+		// Pin each runtime module at the SAME version `gothic init` scaffolds —
+		// FrameworkModules is the single source of truth, so migrate and init never
+		// drift. This is load-bearing: gothic.config.go is generated from the v3
+		// scaffold template, whose Provider-based Deploy schema needs core v1.1.0+;
+		// pinning a stale core here makes the migrated project fail to compile
+		// (undefined: gothic.AWS / Provider / Providers / AWSProvider), which in turn
+		// breaks `go mod tidy` and leaves the other modules unresolved.
+		for _, m := range FrameworkModules {
+			if err := mf.AddRequire(m.Path, m.Version); err != nil {
+				return err
+			}
 		}
 	}
 	mf.Cleanup()
@@ -162,6 +162,31 @@ func rewriteV2ToV3GoMod(path string, content []byte) error {
 		return err
 	}
 	return os.WriteFile(path, out, 0o644)
+}
+
+// makefileNames are the conventional makefile filenames whose recipes are
+// rewritten from the v2 `gothicframework` command to the v3 `gothic` command.
+var makefileNames = []string{"makefile", "Makefile", "GNUmakefile"}
+
+// v2CommandInMakefile matches the legacy `gothicframework` CLI invocation as a
+// standalone command token: preceded by start-of-line or a non-path character
+// (so a module path like `github.com/felipegenef/gothicframework` in a comment is
+// never touched) and ended by a word boundary. RE2 has no lookbehind, so the
+// leading character is captured in group 1 and re-emitted via ${1}.
+var v2CommandInMakefile = regexp.MustCompile(`(^|[^/\w.-])gothicframework\b`)
+
+// rewriteMakefileV3 rewrites `gothicframework <cmd>` invocations to `gothic <cmd>`
+// (the v2->v3 CLI rename) in the makefile at path. Returns whether it changed.
+func rewriteMakefileV3(path string) (bool, error) {
+	original, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	updated := v2CommandInMakefile.ReplaceAll(original, []byte("${1}gothic"))
+	if bytes.Equal(original, updated) {
+		return false, nil
+	}
+	return true, os.WriteFile(path, updated, filePerm(path))
 }
 
 var migrateV3Cmd = &cobra.Command{
@@ -356,6 +381,26 @@ func runMigrateV3(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "Removing %s\n", f)
 		if rerr := os.Remove(full); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
 			return fmt.Errorf("remove %s: %w", f, rerr)
+		}
+	}
+
+	// Step 4b — rename the CLI in the makefile (gothicframework -> gothic). The
+	// binary was renamed in v3, so `make deploy` etc. must call the new command.
+	for _, name := range makefileNames {
+		mkPath := filepath.Join(root, name)
+		if _, serr := os.Stat(mkPath); errors.Is(serr, os.ErrNotExist) {
+			continue
+		}
+		if dryRun {
+			fmt.Fprintf(out, "[dry-run] Would rewrite %s: gothicframework -> gothic\n", name)
+			continue
+		}
+		changed, rerr := rewriteMakefileV3(mkPath)
+		if rerr != nil {
+			return fmt.Errorf("rewrite %s: %w", name, rerr)
+		}
+		if changed {
+			fmt.Fprintf(out, "Rewrote %s CLI commands: gothicframework -> gothic\n", name)
 		}
 	}
 
