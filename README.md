@@ -183,6 +183,74 @@ Infrastructure is managed as code from embedded OpenTofu `.tf.json` stack files 
 
 ---
 
+## Custom infrastructure (`infra/`)
+
+Need a DynamoDB table, an SQS queue, an extra IAM policy, or any other AWS resource alongside your app? Drop `.tf` or `.tf.json` files into an **`infra/`** folder at your project root. On every deploy the CLI merges them **flat** into the same OpenTofu working directory — so your resources live in the **same module and state** as the Gothic stack (`gothic deploy` provisions them, `--action delete` tears them down, all in one plan/apply).
+
+Rules:
+
+- Only `*.tf` and `*.tf.json` files directly inside `infra/` are merged; anything else (READMEs, `.gitkeep`, subfolders) is ignored.
+- A file whose name collides with a Gothic-generated file (`main.tf.json`, `variables.tf.json`, `resources.tf.json`, `outputs.tf.json`, `gothic_outputs.tf.json`, `gothic_vars.auto.tfvars.json`, `env_resolved.tf.json`, `gothic_image.auto.tfvars.json`) is **rejected** — rename it.
+- Reference the Gothic stack through the **stable `local.gothic_*` contract** instead of Gothic's internal resource addresses (which may change between versions):
+
+  | Local | Value |
+  |---|---|
+  | `local.gothic_lambda_role_name` | the app Lambda's IAM role name |
+  | `local.gothic_lambda_role_arn` | the app Lambda's IAM role ARN |
+  | `local.gothic_lambda_function_name` | the app Lambda's function name |
+  | `local.gothic_lambda_function_arn` | the app Lambda's function ARN |
+  | `local.gothic_s3_bucket_name` | the assets S3 bucket name |
+  | `local.gothic_s3_bucket_arn` | the assets S3 bucket ARN |
+  | `local.gothic_cloudfront_distribution_id` | the CloudFront distribution ID |
+  | `local.gothic_cloudfront_domain_name` | the CloudFront domain name |
+
+### Example: a DynamoDB table your app can read/write
+
+`infra/dynamodb.tf.json` — declare the table and grant the Gothic Lambda role read/write on it via an inline role policy:
+
+```json
+{
+  "resource": {
+    "aws_dynamodb_table": {
+      "my_table": {
+        "name": "my-table",
+        "billing_mode": "PAY_PER_REQUEST",
+        "hash_key": "id",
+        "attribute": [
+          { "name": "id", "type": "S" }
+        ]
+      }
+    },
+    "aws_iam_role_policy": {
+      "lambda_my_table": {
+        "name": "my-table-access",
+        "role": "${local.gothic_lambda_role_name}",
+        "policy": "${jsonencode({\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:GetItem\",\"dynamodb:PutItem\",\"dynamodb:UpdateItem\",\"dynamodb:DeleteItem\",\"dynamodb:Query\",\"dynamodb:Scan\"],\"Resource\":[\"${aws_dynamodb_table.my_table.arn}\",\"${aws_dynamodb_table.my_table.arn}/index/*\"]}]})}"
+      }
+    }
+  }
+}
+```
+
+Pass the table name to your app as an environment variable in `gothic.config.go`:
+
+```go
+ENV: map[string]gothic.EnvValue{
+    "TABLE_NAME": gothic.Env("my-table"),
+}
+```
+
+Then read it at runtime and use the AWS SDK — the Lambda already has credentials via its execution role (the same one your `infra/` policy attaches to), so no keys are needed:
+
+```go
+tableName := os.Getenv("TABLE_NAME")
+cfg, _ := awsconfig.LoadDefaultConfig(ctx) // picks up the Lambda role automatically
+ddb := dynamodb.NewFromConfig(cfg)
+// ddb.PutItem(ctx, &dynamodb.PutItemInput{TableName: aws.String(tableName), ...})
+```
+
+---
+
 ## Migrating from v2
 
 If you have an existing v2 project (with `gothic-config.json` and SAM templates), convert it to v3 with one command:

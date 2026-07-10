@@ -365,6 +365,111 @@ func TestManagedCertMode(t *testing.T) {
 	}
 }
 
+// TestGothicOutputsContract asserts gothic_outputs.tf.json exposes the stable
+// local.gothic_* contract user infra/ files reference (not the old empty {}).
+func TestGothicOutputsContract(t *testing.T) {
+	dir := prepareInto(t, minimalParams())
+
+	b, err := os.ReadFile(filepath.Join(dir, "gothic_outputs.tf.json"))
+	if err != nil {
+		t.Fatalf("read gothic_outputs.tf.json: %v", err)
+	}
+	var doc struct {
+		Locals map[string]string `json:"locals"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("unmarshal gothic_outputs: %v", err)
+	}
+	want := map[string]string{
+		"gothic_lambda_role_name":           "${aws_iam_role.lambda.name}",
+		"gothic_lambda_role_arn":            "${aws_iam_role.lambda.arn}",
+		"gothic_lambda_function_name":       "${aws_lambda_function.main.function_name}",
+		"gothic_lambda_function_arn":        "${aws_lambda_function.main.arn}",
+		"gothic_s3_bucket_name":             "${aws_s3_bucket.main.bucket}",
+		"gothic_s3_bucket_arn":              "${aws_s3_bucket.main.arn}",
+		"gothic_cloudfront_distribution_id": "${aws_cloudfront_distribution.main.id}",
+		"gothic_cloudfront_domain_name":     "${aws_cloudfront_distribution.main.domain_name}",
+	}
+	for k, v := range want {
+		if got := doc.Locals[k]; got != v {
+			t.Errorf("local.%s = %q, want %q", k, got, v)
+		}
+	}
+	// Every re-exported attribute must reference a resource that actually exists in
+	// the embedded stack, so the contract can never drift from resources.tf.json.
+	res, err := TofuTemplateFS.ReadFile("embedded/aws/resources.tf.json")
+	if err != nil {
+		t.Fatalf("read resources: %v", err)
+	}
+	for _, ref := range []string{
+		"aws_iam_role", "aws_lambda_function", "aws_s3_bucket", "aws_cloudfront_distribution",
+	} {
+		if !bytes.Contains(res, []byte(ref)) {
+			t.Errorf("gothic_outputs references %q but resources.tf.json declares no such resource", ref)
+		}
+	}
+}
+
+// TestMergeUserInfra: a .tf and a .tf.json dropped in infra/ are both copied flat
+// into the work dir (same module + state as the Gothic stack).
+func TestMergeUserInfra(t *testing.T) {
+	infra := t.TempDir()
+	writeFixture(t, infra, "dynamodb.tf.json", `{"resource":{"aws_dynamodb_table":{"t":{"name":"x","hash_key":"id","billing_mode":"PAY_PER_REQUEST","attribute":[{"name":"id","type":"S"}]}}}}`)
+	writeFixture(t, infra, "extra.tf", `resource "aws_sqs_queue" "q" { name = "x" }`)
+	// A non-.tf file must be ignored, not copied.
+	writeFixture(t, infra, "README.md", "notes")
+
+	params := minimalParams()
+	params.InfraDir = infra
+	dir := prepareInto(t, params)
+
+	for _, name := range []string{"dynamodb.tf.json", "extra.tf"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("infra file %q not merged into work dir: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "README.md")); !os.IsNotExist(err) {
+		t.Errorf("non-.tf file README.md should NOT be merged (err=%v)", err)
+	}
+}
+
+// TestMergeUserInfraCollision: an infra/ file whose base name shadows a Gothic
+// file is rejected with a clear, actionable error — never silently overwritten.
+func TestMergeUserInfraCollision(t *testing.T) {
+	infra := t.TempDir()
+	writeFixture(t, infra, "resources.tf.json", `{"resource":{}}`)
+
+	params := minimalParams()
+	params.InfraDir = infra
+	err := NewGenerator().Prepare(t.TempDir(), params)
+	if err == nil {
+		t.Fatal("expected an error for an infra file colliding with a Gothic-generated file")
+	}
+	if !strings.Contains(err.Error(), "resources.tf.json") || !strings.Contains(err.Error(), "collides") {
+		t.Errorf("error should name the colliding file and say it collides, got: %v", err)
+	}
+}
+
+// TestMergeUserInfraAbsent: no InfraDir (and a non-existent one) is a clean no-op.
+func TestMergeUserInfraAbsent(t *testing.T) {
+	// Unset InfraDir → no-op.
+	prepareInto(t, minimalParams())
+
+	// A pointed-at but non-existent dir must also be a no-op, not an error.
+	params := minimalParams()
+	params.InfraDir = filepath.Join(t.TempDir(), "does-not-exist")
+	if err := NewGenerator().Prepare(t.TempDir(), params); err != nil {
+		t.Errorf("absent infra dir should be a no-op, got: %v", err)
+	}
+}
+
+func writeFixture(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+		t.Fatalf("write fixture %q: %v", name, err)
+	}
+}
+
 // TestCustomDomainWithoutCertOrZone fails the generation with a clear error when a
 // CustomDomain is set but there is no way to obtain a certificate (neither a hosted
 // zone to auto-create one, nor a BYO arn).

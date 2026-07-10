@@ -137,7 +137,7 @@
           "viewer_protocol_policy": "redirect-to-https",
           "allowed_methods": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
           "cached_methods": ["GET", "HEAD"],
-          "cache_policy_id": "4cc15a8a-d715-48a4-82b8-cc0b614638fe"
+          "cache_policy_id": "83da9c7e-98b4-4e11-a168-04f0df8e2c65"
         },
         "ordered_cache_behavior": [
           {

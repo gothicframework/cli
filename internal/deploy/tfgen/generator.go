@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/gothicframework/core/config"
 )
@@ -19,19 +20,19 @@ var safeKeyPattern = regexp.MustCompile(`[^a-zA-Z0-9_]`)
 // to materialise vars.tf.json and env_resolved.tf.json. The base .tf.json files
 // reference these via "${var.*}" / "${local.env_vars}".
 type TfGenParams struct {
-	ProjectName    string
-	Stage          string
-	Suffix         string
-	Region         string
-	Profile        string
-	ServerMemory   int
-	ServerTimeout  int
-	ECRImageURI    string
-	BucketName     string
-	LambdaName     string
-	StateBucket string
-	LockTable   string
-	EnvVars     map[string]config.EnvValue
+	ProjectName   string
+	Stage         string
+	Suffix        string
+	Region        string
+	Profile       string
+	ServerMemory  int
+	ServerTimeout int
+	ECRImageURI   string
+	BucketName    string
+	LambdaName    string
+	StateBucket   string
+	LockTable     string
+	EnvVars       map[string]config.EnvValue
 	// The custom-domain fields are source-aware EnvValues (raw / SSM / Secrets
 	// Manager), resolved into locals by writeEnvResolved exactly like EnvVars. A nil
 	// pointer means the stage did not declare that field.
@@ -39,6 +40,29 @@ type TfGenParams struct {
 	CustomDomain   *config.EnvValue
 	HostedZoneId   *config.EnvValue
 	CertificateArn *config.EnvValue
+
+	// InfraDir is the user's custom-infrastructure directory (cwd-relative, like
+	// the "public/" asset dir). Every *.tf / *.tf.json file directly inside it is
+	// merged flat into workDir so the user's resources land in the SAME module +
+	// state as the Gothic stack, and can reference the stable local.gothic_*
+	// contract. Empty or absent → no-op. Non-.tf files are ignored.
+	InfraDir string
+}
+
+// gothicReservedNames are the base names Gothic itself materialises into workDir.
+// A user infra/ file matching one of these would clobber Gothic's own config, so
+// it is rejected rather than silently overwritten. gothic_image.auto.tfvars.json
+// is written later (at Deploy time) but is still reserved here so a colliding
+// user file can never shadow it.
+var gothicReservedNames = map[string]bool{
+	"main.tf.json":                  true,
+	"variables.tf.json":             true,
+	"resources.tf.json":             true,
+	"outputs.tf.json":               true,
+	"gothic_outputs.tf.json":        true,
+	"gothic_vars.auto.tfvars.json":  true,
+	"env_resolved.tf.json":          true,
+	"gothic_image.auto.tfvars.json": true,
 }
 
 // Generator materialises an OpenTofu working directory for the AWS Gothic stack.
@@ -68,10 +92,81 @@ func (g *Generator) Prepare(workDir string, params TfGenParams) error {
 	if err := g.writeEnvResolved(workDir, params); err != nil {
 		return err
 	}
-	if err := writeJSON(filepath.Join(workDir, "gothic_outputs.tf.json"), map[string]any{}); err != nil {
+	if err := g.writeGothicOutputs(workDir); err != nil {
+		return err
+	}
+	// User infra is merged LAST so the collision guard sees the full set of
+	// Gothic-generated files already in place (and so nothing a user drops can be
+	// overwritten by a later Gothic write).
+	if err := g.mergeUserInfra(workDir, params.InfraDir); err != nil {
 		return err
 	}
 	return nil
+}
+
+// writeGothicOutputs writes gothic_outputs.tf.json: a `locals` block re-exporting
+// the Gothic stack's key resource attributes under STABLE `gothic_*` names. This
+// is the public contract user infra/ files build against (e.g. attaching an IAM
+// policy to the Gothic Lambda role, or granting it access to a new table) — it
+// decouples them from Gothic's internal resource addresses, which may change.
+// Every reference is verified against embedded/aws/resources.tf.json.
+func (g *Generator) writeGothicOutputs(workDir string) error {
+	locals := map[string]any{
+		"gothic_lambda_role_name":           "${aws_iam_role.lambda.name}",
+		"gothic_lambda_role_arn":            "${aws_iam_role.lambda.arn}",
+		"gothic_lambda_function_name":       "${aws_lambda_function.main.function_name}",
+		"gothic_lambda_function_arn":        "${aws_lambda_function.main.arn}",
+		"gothic_s3_bucket_name":             "${aws_s3_bucket.main.bucket}",
+		"gothic_s3_bucket_arn":              "${aws_s3_bucket.main.arn}",
+		"gothic_cloudfront_distribution_id": "${aws_cloudfront_distribution.main.id}",
+		"gothic_cloudfront_domain_name":     "${aws_cloudfront_distribution.main.domain_name}",
+	}
+	return writeJSON(filepath.Join(workDir, "gothic_outputs.tf.json"), map[string]any{"locals": locals})
+}
+
+// mergeUserInfra copies every *.tf / *.tf.json file directly inside infraDir into
+// workDir using a flat layout (base name only), so the user's resources join the
+// SAME OpenTofu module + state as the Gothic stack. Non-.tf files are ignored;
+// subdirectories are not descended into. A file whose base name collides with a
+// Gothic-generated file is rejected (never silently overwritten). An empty or
+// absent infraDir is a no-op.
+func (g *Generator) mergeUserInfra(workDir, infraDir string) error {
+	if infraDir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(infraDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // no custom infra — nothing to merge
+		}
+		return fmt.Errorf("reading infra dir %q: %w", infraDir, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !isTofuFile(name) {
+			continue // ignore non-.tf files (READMEs, .gitkeep, etc.)
+		}
+		if gothicReservedNames[name] {
+			return fmt.Errorf("infra/%s collides with a Gothic-generated file; rename it", name)
+		}
+		data, err := os.ReadFile(filepath.Join(infraDir, name))
+		if err != nil {
+			return fmt.Errorf("reading infra file %q: %w", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(workDir, name), data, 0644); err != nil {
+			return fmt.Errorf("writing infra file %q into work dir: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// isTofuFile reports whether name is an OpenTofu config file (.tf or .tf.json).
+// The .tf.json suffix is checked before .tf so it is not misclassified.
+func isTofuFile(name string) bool {
+	return strings.HasSuffix(name, ".tf.json") || strings.HasSuffix(name, ".tf")
 }
 
 // writeEmbeddedBase copies every embedded base file under embedded/aws/ into

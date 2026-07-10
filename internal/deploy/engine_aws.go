@@ -20,9 +20,9 @@ import (
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	cli "github.com/gothicframework/cli/v3/internal/cli"
-	"github.com/gothicframework/core/config"
 	"github.com/gothicframework/cli/v3/internal/deploy/docker"
 	"github.com/gothicframework/cli/v3/internal/deploy/tfgen"
+	"github.com/gothicframework/core/config"
 
 	"github.com/hashicorp/terraform-exec/tfexec"
 )
@@ -167,6 +167,10 @@ func (e *TofuAwsEngine) buildTfGenParams() tfgen.TfGenParams {
 		StateBucket:   e.stateBucket,
 		LockTable:     e.lockTable,
 		EnvVars:       map[string]config.EnvValue{},
+		// Custom user infrastructure lives in a cwd-relative "infra/" dir, mirroring
+		// the "public/" asset convention: the deploy runs from the project root, so
+		// every *.tf / *.tf.json inside it is merged into the same OpenTofu stack.
+		InfraDir: "infra",
 	}
 	if stageCfg.ENV != nil {
 		params.EnvVars = stageCfg.ENV

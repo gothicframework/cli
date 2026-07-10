@@ -24,6 +24,11 @@ FROM public.ecr.aws/awsguru/aws-lambda-adapter:1.0.1 AS adapter
 FROM scratch
 COPY --from=adapter /lambda-adapter /opt/extensions/lambda-adapter
 COPY --from=build /app/server /server
+# CA certificates for outbound HTTPS. A `scratch` image ships none, so the Go
+# server's TLS calls (AWS SDK, any external API) would fail with
+# "x509: certificate signed by unknown authority". Copy the bundle from the
+# glibc build stage.
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 # The Gothic server binds os.Getenv("HTTP_LISTEN_ADDR"); if empty it falls back to
 # ":80", which a non-root Lambda process cannot bind (permission denied → the
 # runtime exits and every request 500s). Pin it to :8080 to match AWS_LWA_PORT so
