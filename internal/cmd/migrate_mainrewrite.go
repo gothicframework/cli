@@ -85,7 +85,11 @@ func rewriteMainGoV3(mainPath string) (rewritten bool, runtimeLiteral string, er
 		}
 	}
 	if setupStmt == nil || optImgStmt == nil {
-		return false, "", nil // not the recognized shape — leave main.go alone
+		// Not the standard scaffold shape (e.g. a hand-customized main.go). Fall back
+		// to a purely additive inject: mount the runtime middleware without touching
+		// any other statement the user wrote. Returns rewritten=false when it isn't a
+		// recognizable Gothic main, so nothing is clobbered.
+		return injectMiddlewareV3(mainPath, src, fset, file, mainFn)
 	}
 
 	routesAlias := importAlias(file, routesImportPath)
@@ -153,6 +157,114 @@ func rewriteMainGoV3(mainPath string) (rewritten bool, runtimeLiteral string, er
 		runtimeLiteral = toRuntimeLiteral(fset, src, appCfg, routesAlias)
 	}
 	return true, runtimeLiteral, nil
+}
+
+// injectMiddlewareV3 is the additive fallback used when main.go is not the standard
+// scaffold shape. When main.go creates a chi router and registers Gothic's
+// file-based routes but does not yet mount the v3 runtime middleware, it inserts a
+// single `<router>.Use(gothicServer.Middleware(Config.Runtime))` line — after the
+// user's own router.Use calls, mirroring the scaffold order — and adds the
+// middlewares import. It removes nothing, so a hand-customized main.go (e.g. a
+// bespoke LOCAL_SERVE block) is preserved. It is idempotent (a main.go already
+// mounting the middleware is left untouched) and a no-op (rewritten=false) when no
+// single chi router + RegisterFileBasedRoutes pair is found.
+func injectMiddlewareV3(mainPath string, src []byte, fset *token.FileSet, file *ast.File, mainFn *ast.FuncDecl) (bool, string, error) {
+	s := string(src)
+	// Already wired — also the idempotency guard for a second migrate run.
+	if strings.Contains(s, ".Middleware(Config.Runtime)") {
+		return false, "", nil
+	}
+	// Only touch a genuine Gothic main — one that registers the file-based routes.
+	if !strings.Contains(s, "RegisterFileBasedRoutes") {
+		return false, "", nil
+	}
+
+	routerName, newMuxLine := findChiRouter(mainFn, fset)
+	if routerName == "" {
+		return false, "", nil
+	}
+
+	// Insert after the last existing <router>.Use(...) so the Gothic middleware lands
+	// after the user's own (e.g. the logger), else right after the router is created.
+	insertAfter := newMuxLine
+	for _, stmt := range mainFn.Body.List {
+		es, ok := stmt.(*ast.ExprStmt)
+		if !ok {
+			continue
+		}
+		call, ok := es.X.(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Use" {
+			continue
+		}
+		if x, ok := sel.X.(*ast.Ident); ok && x.Name == routerName {
+			if ln := fset.Position(stmt.End()).Line; ln > insertAfter {
+				insertAfter = ln
+			}
+		}
+	}
+
+	lines := strings.Split(s, "\n")
+	if insertAfter < 1 || insertAfter > len(lines) {
+		return false, "", nil
+	}
+	indent := lineIndent(lines, insertAfter)
+	injected := indent + routerName + ".Use(gothicServer.Middleware(Config.Runtime))"
+	next := append([]string{}, lines[:insertAfter]...)
+	next = append(next, injected)
+	next = append(next, lines[insertAfter:]...)
+	out := ensureServerImport(strings.Join(next, "\n"))
+
+	formatted, ferr := format.Source([]byte(out))
+	if ferr != nil {
+		return false, "", fmt.Errorf("rewritten main.go is invalid (left unchanged): %w", ferr)
+	}
+	if werr := os.WriteFile(mainPath, formatted, 0o644); werr != nil {
+		return false, "", werr
+	}
+	return true, "", nil
+}
+
+// findChiRouter returns the variable name and 1-based line of the sole
+// `<name> := chi.NewMux()` / `chi.NewRouter()` assignment in fn. It returns ("", 0)
+// unless there is exactly one such assignment, so the injector never guesses between
+// multiple routers.
+func findChiRouter(fn *ast.FuncDecl, fset *token.FileSet) (string, int) {
+	var name string
+	var line, count int
+	ast.Inspect(fn, func(n ast.Node) bool {
+		as, ok := n.(*ast.AssignStmt)
+		if !ok || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+			return true
+		}
+		call, ok := as.Rhs[0].(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || (sel.Sel.Name != "NewMux" && sel.Sel.Name != "NewRouter") {
+			return true
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if !ok || pkg.Name != "chi" {
+			return true
+		}
+		id, ok := as.Lhs[0].(*ast.Ident)
+		if !ok {
+			return true
+		}
+		count++
+		name = id.Name
+		line = fset.Position(as.Pos()).Line
+		return true
+	})
+	if count != 1 {
+		return "", 0
+	}
+	return name, line
 }
 
 // toRuntimeLiteral converts an old gothicRoutes.AppConfig{...} literal into the
