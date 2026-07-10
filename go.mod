@@ -14,7 +14,7 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/gothicframework/components v1.0.0
-	github.com/gothicframework/core v1.0.0
+	github.com/gothicframework/core v1.1.0
 	github.com/hashicorp/terraform-exec v0.25.2
 	github.com/joho/godotenv v1.5.1
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
