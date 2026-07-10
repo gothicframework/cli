@@ -131,6 +131,14 @@ func (command *InitCommand) CreateNewGothicApp(data cli_data.GothicCliData, modu
 		return err
 	}
 
+	// Now that all sub-packages have their generated .go files (templ + routes),
+	// resolve dependencies and populate go.sum. This must run AFTER codegen — a
+	// tidy during InitializeModule would fail on the not-yet-generated packages
+	// and leave an empty go.sum.
+	if err := command.cli.TidyModule(); err != nil {
+		return err
+	}
+
 	gitRunner := command.gitRunner
 	if gitRunner == nil {
 		gitRunner = defaultGitRunner

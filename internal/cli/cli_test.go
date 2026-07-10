@@ -181,7 +181,7 @@ func TestInitializeModule(t *testing.T) {
 		{Path: "github.com/gothicframework/middlewares", Version: "v1.0.0"},
 	}
 
-	t.Run("runs init, a per-module pin edit, and tidy with correct args", func(t *testing.T) {
+	t.Run("runs init + one per-module pin edit, and does NOT tidy", func(t *testing.T) {
 		f := &fakeRunner{}
 		withFakeRunner(t, f)
 
@@ -189,8 +189,9 @@ func TestInitializeModule(t *testing.T) {
 		if err := cli.InitializeModule("example.com/demo", mods); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// go mod init + one `go mod edit -require` per module + go mod tidy.
-		if want := 2 + len(mods); len(f.calls) != want {
+		// go mod init + one `go mod edit -require` per module. NO tidy here — that
+		// runs later via TidyModule, after codegen.
+		if want := 1 + len(mods); len(f.calls) != want {
 			t.Fatalf("expected %d commands, got %d: %v", want, len(f.calls), f.calls)
 		}
 		wantInit := []string{"go", "mod", "init", "example.com/demo"}
@@ -203,24 +204,22 @@ func TestInitializeModule(t *testing.T) {
 				t.Errorf("pin cmd[%d] = %v, want %v", i, f.calls[1+i], want)
 			}
 		}
-		wantTidy := []string{"go", "mod", "tidy"}
-		if last := f.calls[len(f.calls)-1]; !equalArgs(last, wantTidy) {
-			t.Errorf("tidy cmd = %v, want %v", last, wantTidy)
+		for _, c := range f.calls {
+			if len(c) > 1 && c[1] == "mod" && len(c) > 2 && c[2] == "tidy" {
+				t.Errorf("InitializeModule must NOT run go mod tidy; got %v", c)
+			}
 		}
 	})
 
-	t.Run("no pins when module list empty", func(t *testing.T) {
+	t.Run("no pins when module list empty (init only)", func(t *testing.T) {
 		f := &fakeRunner{}
 		withFakeRunner(t, f)
 		cli := GothicCli{}
 		if err := cli.InitializeModule("example.com/demo", nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(f.calls) != 2 {
-			t.Fatalf("expected 2 commands (init + tidy, no pins), got %d: %v", len(f.calls), f.calls)
-		}
-		if f.calls[1][1] != "mod" || f.calls[1][2] != "tidy" {
-			t.Errorf("second cmd should be go mod tidy, got %v", f.calls[1])
+		if len(f.calls) != 1 {
+			t.Fatalf("expected 1 command (init only, no pins, no tidy), got %d: %v", len(f.calls), f.calls)
 		}
 	})
 
@@ -241,15 +240,29 @@ func TestInitializeModule(t *testing.T) {
 			t.Fatal("expected error from go mod edit pin")
 		}
 	})
+}
 
-	t.Run("tidy failure is non-fatal warning", func(t *testing.T) {
-		// go mod tidy failure is a warning (not fatal) so a project scaffolds
-		// correctly — with its pinned require lines already written — even before
-		// the framework versions are published to the registry.
+func TestTidyModule(t *testing.T) {
+	t.Run("runs go mod tidy", func(t *testing.T) {
+		f := &fakeRunner{}
+		withFakeRunner(t, f)
+		cli := GothicCli{}
+		if err := cli.TidyModule(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []string{"go", "mod", "tidy"}
+		if len(f.calls) != 1 || !equalArgs(f.calls[0], want) {
+			t.Fatalf("expected exactly `go mod tidy`, got %v", f.calls)
+		}
+	})
+
+	t.Run("tidy failure is a non-fatal warning", func(t *testing.T) {
+		// A tidy failure (e.g. framework versions not yet published) must not abort
+		// init — it warns and the scaffold stays usable.
 		f := &fakeRunner{failOn: "tidy"}
 		withFakeRunner(t, f)
 		cli := GothicCli{}
-		if err := cli.InitializeModule("example.com/demo", mods); err != nil {
+		if err := cli.TidyModule(); err != nil {
 			t.Fatalf("tidy failure should be a warning, not an error; got: %v", err)
 		}
 	})

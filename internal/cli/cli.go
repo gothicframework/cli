@@ -193,15 +193,18 @@ type FrameworkModule struct {
 	Version string
 }
 
-// InitializeModule runs `go mod init` for a new project, pins each framework
-// library to the version the scaffolding CLI ships with, then runs `go mod tidy`.
+// InitializeModule runs `go mod init` for a new project and pins each framework
+// library to the version the scaffolding CLI ships with.
 //
 // Each pin is a per-module version (core / components / middlewares version
 // independently), written with `go mod edit -require` — a purely textual, offline
 // edit — so a fresh project records the intended versions even before those
-// libraries are published to the module proxy. `go mod tidy` is best-effort: it
-// fills go.sum once the versions resolve, and is tolerated (warn + continue) when
-// they are not yet published.
+// libraries are published to the module proxy.
+//
+// It deliberately does NOT run `go mod tidy` here: at init time the generated
+// sub-packages (src/layouts, src/pages, …) have no `.go` files yet (templ + route
+// codegen runs afterwards), so a tidy would fail to resolve them and leave an
+// empty go.sum. `gothic init` calls TidyModule AFTER all codegen instead.
 //
 // This is the ONLY place the CLI writes framework versions into a user's go.mod.
 // No other command rewrites them, so a project may bump any framework library
@@ -219,12 +222,19 @@ func (cli *GothicCli) InitializeModule(goModuleName string, modules []FrameworkM
 			return fmt.Errorf("error pinning %s@%s: %w", m.Path, m.Version, err)
 		}
 	}
+	return nil
+}
+
+// TidyModule runs `go mod tidy` in the project root to resolve every dependency
+// (framework libraries + templ/chi/godotenv) and populate go.sum. It MUST run
+// AFTER the templ + route codegen so all generated sub-packages resolve; running
+// it before (e.g. inside InitializeModule) fails and leaves an empty go.sum.
+//
+// Best-effort: it warns rather than aborts when the framework versions aren't yet
+// published to the registry (dev/pre-publish), so `gothic init` still completes.
+func (cli *GothicCli) TidyModule() error {
+	ctx := context.Background()
 	if _, err := cliRunner.Run(ctx, "go", "mod", "tidy"); err != nil {
-		// go mod tidy can fail when the framework versions aren't published yet.
-		// This is expected during development; warn and continue so the project
-		// files (and the pinned require lines) are still usable. Run "go mod tidy"
-		// manually once the packages are available on the registry (or after
-		// adding replace directives).
 		fmt.Fprintln(os.Stderr, "warning: go mod tidy failed — run it manually after the framework packages are available on the registry.")
 	}
 	return nil
