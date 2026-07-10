@@ -30,33 +30,39 @@ var Config = gothic.Config{
 		ServeStaticFiles:      gothic.HOT_RELOAD_ONLY,
 	},
 	Deploy: &gothic.DeployConfig{
-		ServerMemory:  512,
-		ServerTimeout: 30,
-		Region:        "us-east-1",
-		Profile:       "default",
-		Stages: map[string]gothic.Stage{
-			"dev": {
-				// Custom domain (optional). These 4 fields are source-aware like ENV:
-				// use gothic.Env("literal"), gothic.SSMParam("/path") or
-				// gothic.SecretsManager("/path") so a domain or ARN is pulled at
-				// deploy time instead of being committed in plain text.
-				//
-				// Set CustomDomain + HostedZoneId and Gothic creates + DNS-validates
-				// the ACM certificate for you, in us-east-1, regardless of the stack's
-				// Region — no CertificateArn needed. Provide CertificateArn only to
-				// reuse an existing us-east-1 certificate instead.
-				// CustomDomain: gothic.SSMParam("/myapp/dev/domain"),
-				// HostedZoneId: gothic.SSMParam("/myapp/dev/hosted-zone-id"),
-				// CertificateArn: gothic.SecretsManager("/myapp/dev/cert-arn"), // optional (BYO)
-				// WafArn:         gothic.SSMParam("/myapp/dev/waf-arn"),         // optional
-				ENV: map[string]gothic.EnvValue{
-					// "PORT":     gothic.Env("8080"),
-					// "DB_URL":   gothic.SSMParam("/myapp/dev/db-url"),
-					// A Secrets Manager secret is usually a JSON object; use .Get to pull a
-					// single field so the env var receives the value, not the whole JSON:
-					// "API_KEY":  gothic.SecretsManager("/myapp/dev/api-key").Get("secret-key"),
-					// Omit .Get when the secret/parameter stores a plain string:
-					// "API_KEY":  gothic.SecretsManager("/myapp/dev/api-key"),
+		// Provider selects the cloud to deploy to. v3 ships AWS only.
+		Provider: gothic.AWS,
+		Providers: gothic.Providers{
+			AWS: gothic.AWSProvider{
+				ServerMemory:  512,
+				ServerTimeout: 30,
+				Region:        "us-east-1",
+				Profile:       "default",
+				Stages: map[string]gothic.Stage{
+					"dev": {
+						// Custom domain (optional). These 4 fields are source-aware like ENV:
+						// use gothic.Env("literal"), gothic.SSMParam("/path") or
+						// gothic.SecretsManager("/path") so a domain or ARN is pulled at
+						// deploy time instead of being committed in plain text.
+						//
+						// Set CustomDomain + HostedZoneId and Gothic creates + DNS-validates
+						// the ACM certificate for you, in us-east-1, regardless of the stack's
+						// Region — no CertificateArn needed. Provide CertificateArn only to
+						// reuse an existing us-east-1 certificate instead.
+						// CustomDomain: gothic.SSMParam("/myapp/dev/domain"),
+						// HostedZoneId: gothic.SSMParam("/myapp/dev/hosted-zone-id"),
+						// CertificateArn: gothic.SecretsManager("/myapp/dev/cert-arn"), // optional (BYO)
+						// WafArn:         gothic.SSMParam("/myapp/dev/waf-arn"),         // optional
+						ENV: map[string]gothic.EnvValue{
+							// "PORT":     gothic.Env("8080"),
+							// "DB_URL":   gothic.SSMParam("/myapp/dev/db-url"),
+							// A Secrets Manager secret is usually a JSON object; use .Get to pull a
+							// single field so the env var receives the value, not the whole JSON:
+							// "API_KEY":  gothic.SecretsManager("/myapp/dev/api-key").Get("secret-key"),
+							// Omit .Get when the secret/parameter stores a plain string:
+							// "API_KEY":  gothic.SecretsManager("/myapp/dev/api-key"),
+						},
+					},
 				},
 			},
 		},

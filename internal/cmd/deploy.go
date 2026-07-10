@@ -89,14 +89,14 @@ func (command *DeployCommand) Deploy(stage string, action string) error {
 		return fmt.Errorf("Deploy configuration missing in gothic.config.go")
 	}
 
-	// A stage must be declared in gothic.config.go (Deploy.Stages). Deploying an
+	// A stage must be declared in gothic.config.go (Deploy.Providers.AWS.Stages). Deploying an
 	// undeclared stage is almost always a typo (e.g. "de" instead of "dev") that
 	// would silently stand up an entire parallel set of AWS resources under the
 	// wrong name. Block it. Delete stays permissive so an orphaned or renamed
 	// stage can still be torn down.
-	if _, ok := config.Deploy.Stages[stage]; !ok {
+	if _, ok := config.Deploy.Providers.AWS.Stages[stage]; !ok {
 		if action == "deploy" {
-			return fmt.Errorf("%q is not a stage declared in gothic.config.go (Deploy.Stages).%s", stage, declaredStagesHint(config.Deploy.Stages))
+			return fmt.Errorf("%q is not a stage declared in gothic.config.go (Deploy.Providers.AWS.Stages).%s", stage, declaredStagesHint(config.Deploy.Providers.AWS.Stages))
 		}
 		fmt.Println(paint(clrYellow, fmt.Sprintf("⚠ stage %q is not declared in gothic.config.go — proceeding with teardown anyway.", stage)))
 	}
@@ -153,10 +153,10 @@ func (command *DeployCommand) Deploy(stage string, action string) error {
 			Stage:       stage,
 			ProjectName: config.ProjectName,
 			Suffix:      suffix,
-			Region:      config.Deploy.Region,
+			Region:      config.Deploy.Providers.AWS.Region,
 			Outputs:     map[string]string{},
 		}
-		if stageCfg, ok := config.Deploy.Stages[stage]; ok {
+		if stageCfg, ok := config.Deploy.Providers.AWS.Stages[stage]; ok {
 			gctx.Env = stageCfg.ENV
 		}
 		// BeforeDeploy fires after Prepare but before any image build / apply so a
@@ -215,7 +215,7 @@ func (command *DeployCommand) Deploy(stage string, action string) error {
 // to add one when none exist) appended to the invalid-stage error message.
 func declaredStagesHint(stages map[string]gothic_cli.EnvVariables) string {
 	if len(stages) == 0 {
-		return " No stages are declared — add one under Deploy.Stages first."
+		return " No stages are declared — add one under Deploy.Providers.AWS.Stages first."
 	}
 	names := make([]string, 0, len(stages))
 	for s := range stages {
@@ -252,7 +252,7 @@ func promptDeleteRemoteState(ctx context.Context, cli *gothic_cli.GothicCli, con
 	// deleting the backend would orphan that stage's resources — so refuse outright
 	// rather than even offering it. On a check error, preserve state (the safe
 	// default); the user can always delete the backend manually.
-	others, err := tofu.OtherStageStates(ctx, config.Deploy.Region, config.Deploy.Profile, stateBucket, config.ProjectName, stage)
+	others, err := tofu.OtherStageStates(ctx, config.Deploy.Providers.AWS.Region, config.Deploy.Providers.AWS.Profile, stateBucket, config.ProjectName, stage)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Remote state preserved — could not verify other stages: %v\n", err)
 		return
@@ -272,7 +272,7 @@ func promptDeleteRemoteState(ctx context.Context, cli *gothic_cli.GothicCli, con
 		return
 	}
 
-	if err := tofu.DeleteRemoteState(ctx, config.Deploy.Region, config.Deploy.Profile, stateBucket, lockTable); err != nil {
+	if err := tofu.DeleteRemoteState(ctx, config.Deploy.Providers.AWS.Region, config.Deploy.Providers.AWS.Profile, stateBucket, lockTable); err != nil {
 		fmt.Fprintf(os.Stderr, "error deleting remote state: %v\n", err)
 		return
 	}

@@ -81,50 +81,55 @@ func writeConfig(t *testing.T, contents string) {
 		}
 	}
 	if dep, ok := raw["deploy"].(map[string]any); ok {
+		// The JSON input keeps the flat v2 deploy shape (region/profile/stages at the
+		// top level); the generated gothic.config.go nests it under the v3
+		// Provider + Providers.AWS structure.
 		b.WriteString("\tDeploy: &gothic.DeployConfig{\n")
+		b.WriteString("\t\tProvider: gothic.AWS,\n")
+		b.WriteString("\t\tProviders: gothic.Providers{\n")
+		b.WriteString("\t\t\tAWS: gothic.AWSProvider{\n")
 		if v, ok := num(dep, "serverMemory"); ok {
-			fmt.Fprintf(&b, "\t\tServerMemory: %d,\n", int(v))
+			fmt.Fprintf(&b, "\t\t\t\tServerMemory: %d,\n", int(v))
 		}
 		if v, ok := num(dep, "serverTimeout"); ok {
-			fmt.Fprintf(&b, "\t\tServerTimeout: %d,\n", int(v))
+			fmt.Fprintf(&b, "\t\t\t\tServerTimeout: %d,\n", int(v))
 		}
 		if v := str(dep, "region"); v != "" {
-			fmt.Fprintf(&b, "\t\tRegion: %q,\n", v)
+			fmt.Fprintf(&b, "\t\t\t\tRegion: %q,\n", v)
 		}
 		if v := str(dep, "profile"); v != "" {
-			fmt.Fprintf(&b, "\t\tProfile: %q,\n", v)
-		}
-		if v, ok := dep["customDomain"].(bool); ok {
-			fmt.Fprintf(&b, "\t\tCustomDomain: %t,\n", v)
+			fmt.Fprintf(&b, "\t\t\t\tProfile: %q,\n", v)
 		}
 		if stages, ok := dep["stages"].(map[string]any); ok {
-			b.WriteString("\t\tStages: map[string]gothic.Stage{\n")
+			b.WriteString("\t\t\t\tStages: map[string]gothic.Stage{\n")
 			for name, sv := range stages {
 				stage, _ := sv.(map[string]any)
-				fmt.Fprintf(&b, "\t\t\t%q: {\n", name)
+				fmt.Fprintf(&b, "\t\t\t\t\t%q: {\n", name)
 				if v := str(stage, "customDomain"); v != "" {
-					fmt.Fprintf(&b, "\t\t\t\tCustomDomain: %q,\n", v)
+					fmt.Fprintf(&b, "\t\t\t\t\t\tCustomDomain: gothic.Env(%q),\n", v)
 				}
 				if v := str(stage, "hostedZoneId"); v != "" {
-					fmt.Fprintf(&b, "\t\t\t\tHostedZoneId: %q,\n", v)
+					fmt.Fprintf(&b, "\t\t\t\t\t\tHostedZoneId: gothic.Env(%q),\n", v)
 				}
 				if v := str(stage, "certificateArn"); v != "" {
-					fmt.Fprintf(&b, "\t\t\t\tCertificateArn: %q,\n", v)
+					fmt.Fprintf(&b, "\t\t\t\t\t\tCertificateArn: gothic.Env(%q),\n", v)
 				}
 				if v := str(stage, "wafArn"); v != "" {
-					fmt.Fprintf(&b, "\t\t\t\tWafArn: %q,\n", v)
+					fmt.Fprintf(&b, "\t\t\t\t\t\tWafArn: gothic.Env(%q),\n", v)
 				}
 				if env, ok := stage["env"].(map[string]any); ok && len(env) > 0 {
-					b.WriteString("\t\t\t\tENV: map[string]gothic.EnvValue{\n")
+					b.WriteString("\t\t\t\t\t\tENV: map[string]gothic.EnvValue{\n")
 					for ek, ev := range env {
-						fmt.Fprintf(&b, "\t\t\t\t\t%q: gothic.Env(%q),\n", ek, fmt.Sprint(ev))
+						fmt.Fprintf(&b, "\t\t\t\t\t\t\t%q: gothic.Env(%q),\n", ek, fmt.Sprint(ev))
 					}
-					b.WriteString("\t\t\t\t},\n")
+					b.WriteString("\t\t\t\t\t\t},\n")
 				}
-				b.WriteString("\t\t\t},\n")
+				b.WriteString("\t\t\t\t\t},\n")
 			}
-			b.WriteString("\t\t},\n")
+			b.WriteString("\t\t\t\t},\n")
 		}
+		b.WriteString("\t\t\t},\n")
+		b.WriteString("\t\t},\n")
 		b.WriteString("\t},\n")
 	}
 	b.WriteString("}\n")

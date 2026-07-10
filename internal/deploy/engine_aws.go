@@ -151,16 +151,17 @@ func (e *TofuAwsEngine) Prepare(ctx context.Context, stage string) error {
 // vars file — here we simply pass what is known at Prepare time).
 func (e *TofuAwsEngine) buildTfGenParams() tfgen.TfGenParams {
 	c := e.config
-	stageCfg := c.Deploy.Stages[e.stage]
+	aws := c.Deploy.Providers.AWS
+	stageCfg := aws.Stages[e.stage]
 
 	params := tfgen.TfGenParams{
 		ProjectName:   c.ProjectName,
 		Stage:         e.stage,
 		Suffix:        e.suffix,
-		Region:        c.Deploy.Region,
-		Profile:       c.Deploy.Profile,
-		ServerMemory:  c.Deploy.ServerMemory,
-		ServerTimeout: c.Deploy.ServerTimeout,
+		Region:        aws.Region,
+		Profile:       aws.Profile,
+		ServerMemory:  aws.ServerMemory,
+		ServerTimeout: aws.ServerTimeout,
 		BucketName:    e.bucketName,
 		LambdaName:    e.lambdaName,
 		StateBucket:   e.stateBucket,
@@ -196,9 +197,9 @@ func (e *TofuAwsEngine) bootstrapStateBucket(ctx context.Context) error {
 
 	createInput := &s3.CreateBucketInput{Bucket: aws.String(e.stateBucket)}
 	// us-east-1 must NOT set a LocationConstraint; all other regions must.
-	if e.config.Deploy.Region != "us-east-1" {
+	if e.config.Deploy.Providers.AWS.Region != "us-east-1" {
 		createInput.CreateBucketConfiguration = &s3types.CreateBucketConfiguration{
-			LocationConstraint: s3types.BucketLocationConstraint(e.config.Deploy.Region),
+			LocationConstraint: s3types.BucketLocationConstraint(e.config.Deploy.Providers.AWS.Region),
 		}
 	}
 	if _, err := s3Client.CreateBucket(ctx, createInput); err != nil {

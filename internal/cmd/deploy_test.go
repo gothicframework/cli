@@ -107,7 +107,7 @@ func TestDeployProceedsUntilWasmScan(t *testing.T) {
 }
 
 // TestDeployRejectsUndeclaredStage locks in that deploying a stage absent from
-// gothic.config.go (Deploy.Stages) is refused before any build/AWS work — the
+// gothic.config.go (Deploy.Providers.AWS.Stages) is refused before any build/AWS work — the
 // guard that catches typos like "de" for "dev". The error must name the offending
 // stage and list the declared ones.
 func TestDeployRejectsUndeclaredStage(t *testing.T) {
@@ -198,7 +198,10 @@ func newDeleteTestConfig() gothic_cli.Config {
 	return gothic_cli.Config{
 		ProjectName: "demo",
 		GoModName:   "example.com/demo",
-		Deploy:      &gothic_cli.DeployConfig{Region: "us-east-1", Profile: "default"},
+		Deploy: &gothic_cli.DeployConfig{Provider: gothic_cli.AWS, Providers: gothic_cli.Providers{AWS: gothic_cli.AWSProvider{
+			Region:  "us-east-1",
+			Profile: "default",
+		}}},
 	}
 }
 

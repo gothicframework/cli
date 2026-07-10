@@ -74,7 +74,10 @@ func newTestEngine(s3m bootstrapS3Iface, ddbm bootstrapDDBIface) *TofuAwsEngine 
 		config: &cli.Config{
 			ProjectName: "demo",
 			GoModName:   "example.com/demo",
-			Deploy:      &cli.DeployConfig{Region: "us-east-1", Profile: "default"},
+			Deploy: &cli.DeployConfig{Provider: cli.AWS, Providers: cli.Providers{AWS: cli.AWSProvider{
+				Region:  "us-east-1",
+				Profile: "default",
+			}}},
 		},
 		stateBucket: "demo-state-x",
 		lockTable:   "demo-lock-x",
@@ -243,18 +246,21 @@ func TestBuildTfGenParamsMapsPointerFields(t *testing.T) {
 		config: &cli.Config{
 			ProjectName: "demo",
 			Deploy: &cli.DeployConfig{
-				Region:        "us-east-1",
-				Profile:       "default",
-				ServerMemory:  512,
-				ServerTimeout: 30,
-				Stages: map[string]cli.EnvVariables{
-					"prod": {
-						CustomDomain:   &domain,
-						HostedZoneId:   &zone,
-						CertificateArn: &cert,
-						WafArn:         &waf,
+				Provider: cli.AWS,
+				Providers: cli.Providers{AWS: cli.AWSProvider{
+					Region:        "us-east-1",
+					Profile:       "default",
+					ServerMemory:  512,
+					ServerTimeout: 30,
+					Stages: map[string]cli.EnvVariables{
+						"prod": {
+							CustomDomain:   &domain,
+							HostedZoneId:   &zone,
+							CertificateArn: &cert,
+							WafArn:         &waf,
+						},
 					},
-				},
+				}},
 			},
 		},
 	}
@@ -281,9 +287,12 @@ func TestPrepareComputesDeterministicNames(t *testing.T) {
 			ProjectName: "demo",
 			GoModName:   "example.com/demo",
 			Deploy: &cli.DeployConfig{
-				Region:  "us-east-1",
-				Profile: "default",
-				Stages:  map[string]cli.EnvVariables{"dev": {}},
+				Provider: cli.AWS,
+				Providers: cli.Providers{AWS: cli.AWSProvider{
+					Region:  "us-east-1",
+					Profile: "default",
+					Stages:  map[string]cli.EnvVariables{"dev": {}},
+				}},
 			},
 		},
 		tfgen: tfgen.NewGenerator(),

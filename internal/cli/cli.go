@@ -169,9 +169,15 @@ func (cli *GothicCli) GetConfig() (Config, error) {
 	// AWS config (shared profile + region) is loaded once here so deploy-time
 	// code paths need not reload it.
 	if config.Deploy != nil && NewDeploymentEngine != nil && NewCDNEngine != nil {
+		// v3 ships AWS only. Reject any other provider up front rather than
+		// silently building an AWS engine for a GCP/Azure config.
+		if config.Deploy.Provider != AWS {
+			return Config{}, fmt.Errorf("deploy provider not supported yet: only AWS is available in v3")
+		}
+		aws := config.Deploy.Providers.AWS
 		awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(),
-			awsconfig.WithRegion(config.Deploy.Region),
-			awsconfig.WithSharedConfigProfile(config.Deploy.Profile),
+			awsconfig.WithRegion(aws.Region),
+			awsconfig.WithSharedConfigProfile(aws.Profile),
 		)
 		if err != nil {
 			return Config{}, fmt.Errorf("loading AWS config: %w", err)

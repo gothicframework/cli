@@ -10,10 +10,15 @@ import (
 var Config = gothic.Config{
 	ProjectName: "orchapp",
 	Deploy: &gothic.DeployConfig{
-		Region:  "us-east-1",
-		Profile: "default",
-		Stages: map[string]gothic.Stage{
-			"dev": {},
+		Provider: gothic.AWS,
+		Providers: gothic.Providers{
+			AWS: gothic.AWSProvider{
+				Region:  "us-east-1",
+				Profile: "default",
+				Stages: map[string]gothic.Stage{
+					"dev": {},
+				},
+			},
 		},
 	},
 }

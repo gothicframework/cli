@@ -116,12 +116,99 @@ func Parse(projectRoot string) (*cli.Config, error) {
 }
 
 func parseDeploy(fset *token.FileSet, v ast.Expr) (*cli.DeployConfig, error) {
-	// Deploy is &gothic.DeployConfig{...}
+	// Deploy is &gothic.DeployConfig{Provider: ..., Providers: gothic.Providers{...}}
 	lit, ok := compositeLit(v)
 	if !ok {
 		return nil, nil
 	}
-	dc := &cli.DeployConfig{}
+	// Provider defaults to AWS (the zero value) when the field is omitted.
+	dc := &cli.DeployConfig{Provider: cli.AWS}
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		switch identName(kv.Key) {
+		case "Provider":
+			p, err := parseProvider(fset, kv.Value)
+			if err != nil {
+				return nil, err
+			}
+			dc.Provider = p
+		case "Providers":
+			providers, err := parseProviders(fset, kv.Value)
+			if err != nil {
+				return nil, err
+			}
+			dc.Providers = providers
+		}
+	}
+	return dc, nil
+}
+
+// parseProvider maps a Provider selector (e.g. gothic.AWS) or bare identifier
+// (AWS) to the internal cli.Provider. Because there is no type-checker, it keys
+// off the trailing identifier NAME. Unknown names are rejected with a clear error.
+func parseProvider(fset *token.FileSet, v ast.Expr) (cli.Provider, error) {
+	name := providerIdentName(v)
+	if name == "" {
+		// Non-identifier expression (e.g. a computed value we can't read
+		// statically). Fall back to the default provider rather than erroring.
+		return cli.AWS, nil
+	}
+	switch name {
+	case "AWS":
+		return cli.AWS, nil
+	default:
+		return cli.AWS, fmt.Errorf("unknown deploy provider %q at %s: valid providers are gothic.AWS", name, fset.Position(v.Pos()))
+	}
+}
+
+// providerIdentName returns the trailing identifier of a provider expression,
+// handling both gothic.AWS (SelectorExpr) and a bare AWS (Ident).
+func providerIdentName(e ast.Expr) string {
+	switch v := e.(type) {
+	case *ast.SelectorExpr:
+		return v.Sel.Name
+	case *ast.Ident:
+		return v.Name
+	}
+	return ""
+}
+
+// parseProviders walks Providers{AWS: gothic.AWSProvider{...}} and extracts the
+// AWS-specific deploy settings (memory, timeout, region, profile, stages).
+func parseProviders(fset *token.FileSet, v ast.Expr) (cli.Providers, error) {
+	providers := cli.Providers{}
+	lit, ok := compositeLit(v)
+	if !ok {
+		return providers, nil
+	}
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		if identName(kv.Key) == "AWS" {
+			aws, err := parseAWSProvider(fset, kv.Value)
+			if err != nil {
+				return providers, err
+			}
+			providers.AWS = aws
+		}
+	}
+	return providers, nil
+}
+
+// parseAWSProvider extracts the AWS deploy settings from a gothic.AWSProvider
+// composite literal. This is the former Deploy-level extraction, moved one
+// nesting level down.
+func parseAWSProvider(fset *token.FileSet, v ast.Expr) (cli.AWSProvider, error) {
+	aws := cli.AWSProvider{}
+	lit, ok := compositeLit(v)
+	if !ok {
+		return aws, nil
+	}
 	for _, elt := range lit.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
@@ -130,33 +217,29 @@ func parseDeploy(fset *token.FileSet, v ast.Expr) (*cli.DeployConfig, error) {
 		switch identName(kv.Key) {
 		case "ServerMemory":
 			if n, ok := intLit(kv.Value); ok {
-				dc.ServerMemory = n
+				aws.ServerMemory = n
 			}
 		case "ServerTimeout":
 			if n, ok := intLit(kv.Value); ok {
-				dc.ServerTimeout = n
+				aws.ServerTimeout = n
 			}
 		case "Region":
 			if s, ok := stringLit(kv.Value); ok {
-				dc.Region = s
+				aws.Region = s
 			}
 		case "Profile":
 			if s, ok := stringLit(kv.Value); ok {
-				dc.Profile = s
-			}
-		case "CustomDomain":
-			if b, ok := boolLit(kv.Value); ok {
-				dc.CustomDomain = b
+				aws.Profile = s
 			}
 		case "Stages":
 			stages, err := parseStages(fset, kv.Value)
 			if err != nil {
-				return nil, err
+				return aws, err
 			}
-			dc.Stages = stages
+			aws.Stages = stages
 		}
 	}
-	return dc, nil
+	return aws, nil
 }
 
 func parseStages(fset *token.FileSet, v ast.Expr) (map[string]cli.EnvVariables, error) {
@@ -403,20 +486,6 @@ func stringLit(e ast.Expr) (string, bool) {
 		return "", false
 	}
 	return s, true
-}
-
-func boolLit(e ast.Expr) (bool, bool) {
-	id, ok := e.(*ast.Ident)
-	if !ok {
-		return false, false
-	}
-	switch id.Name {
-	case "true":
-		return true, true
-	case "false":
-		return false, true
-	}
-	return false, false
 }
 
 func intLit(e ast.Expr) (int, bool) {

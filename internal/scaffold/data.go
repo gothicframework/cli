@@ -106,13 +106,10 @@ var DefaultCLIData = GothicCliData{
 	InitialDirs: []string{
 		// Root Dirs
 		"public",
-		".gothicCli",
 		"src",
 		"optimize",
 		// Public Dirs
 		"public/imageExample",
-		// Cli Dirs
-		".gothicCli/templates",
 		// Src Dirs
 		"src/api",
 		"src/components",

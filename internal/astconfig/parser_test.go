@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	cli "github.com/gothicframework/cli/v3/internal/cli"
 	config "github.com/gothicframework/core/config"
 )
 
@@ -23,19 +24,23 @@ func TestParseBasic(t *testing.T) {
 	if cfg.Deploy == nil {
 		t.Fatal("Deploy is nil")
 	}
-	if cfg.Deploy.Region != "us-east-1" {
-		t.Errorf("Region = %q, want us-east-1", cfg.Deploy.Region)
+	if cfg.Deploy.Provider != cli.AWS {
+		t.Errorf("Provider = %d, want AWS (%d)", cfg.Deploy.Provider, cli.AWS)
 	}
-	if cfg.Deploy.Profile != "default" {
-		t.Errorf("Profile = %q, want default", cfg.Deploy.Profile)
+	aws := cfg.Deploy.Providers.AWS
+	if aws.Region != "us-east-1" {
+		t.Errorf("Region = %q, want us-east-1", aws.Region)
 	}
-	if cfg.Deploy.ServerMemory != 512 {
-		t.Errorf("ServerMemory = %d, want 512", cfg.Deploy.ServerMemory)
+	if aws.Profile != "default" {
+		t.Errorf("Profile = %q, want default", aws.Profile)
 	}
-	if cfg.Deploy.ServerTimeout != 30 {
-		t.Errorf("ServerTimeout = %d, want 30", cfg.Deploy.ServerTimeout)
+	if aws.ServerMemory != 512 {
+		t.Errorf("ServerMemory = %d, want 512", aws.ServerMemory)
 	}
-	dev, ok := cfg.Deploy.Stages["dev"]
+	if aws.ServerTimeout != 30 {
+		t.Errorf("ServerTimeout = %d, want 30", aws.ServerTimeout)
+	}
+	dev, ok := aws.Stages["dev"]
 	if !ok {
 		t.Fatal("missing dev stage")
 	}
@@ -74,17 +79,21 @@ func TestParseFull(t *testing.T) {
 	if cfg.Deploy == nil {
 		t.Fatal("Deploy is nil")
 	}
-	if cfg.Deploy.ServerMemory != 1024 || cfg.Deploy.ServerTimeout != 60 {
-		t.Errorf("server mem/timeout = %d/%d", cfg.Deploy.ServerMemory, cfg.Deploy.ServerTimeout)
+	if cfg.Deploy.Provider != cli.AWS {
+		t.Errorf("Provider = %d, want AWS (%d)", cfg.Deploy.Provider, cli.AWS)
 	}
-	if cfg.Deploy.Region != "us-west-2" || cfg.Deploy.Profile != "prod-profile" {
-		t.Errorf("region/profile = %q/%q", cfg.Deploy.Region, cfg.Deploy.Profile)
+	aws := cfg.Deploy.Providers.AWS
+	if aws.ServerMemory != 1024 || aws.ServerTimeout != 60 {
+		t.Errorf("server mem/timeout = %d/%d", aws.ServerMemory, aws.ServerTimeout)
+	}
+	if aws.Region != "us-west-2" || aws.Profile != "prod-profile" {
+		t.Errorf("region/profile = %q/%q", aws.Region, aws.Profile)
 	}
 
-	if _, ok := cfg.Deploy.Stages["dev"]; !ok {
+	if _, ok := aws.Stages["dev"]; !ok {
 		t.Error("missing dev stage")
 	}
-	prod, ok := cfg.Deploy.Stages["prod"]
+	prod, ok := aws.Stages["prod"]
 	if !ok {
 		t.Fatal("missing prod stage")
 	}
@@ -123,6 +132,37 @@ func TestParseFull(t *testing.T) {
 	}
 }
 
+// TestParseProviderDefaultsToAWS locks in that a Deploy block omitting Provider
+// still resolves to AWS (the zero value) and the AWS settings under
+// Providers.AWS are read.
+func TestParseProviderDefaultsToAWS(t *testing.T) {
+	cfg, err := Parse("testdata/noprovider")
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	if cfg.Deploy == nil {
+		t.Fatal("Deploy is nil")
+	}
+	if cfg.Deploy.Provider != cli.AWS {
+		t.Errorf("Provider = %d, want AWS (%d) by default", cfg.Deploy.Provider, cli.AWS)
+	}
+	if cfg.Deploy.Providers.AWS.Region != "eu-west-1" {
+		t.Errorf("Region = %q, want eu-west-1", cfg.Deploy.Providers.AWS.Region)
+	}
+}
+
+// TestParseUnknownProvider ensures an unsupported provider name (e.g. gothic.GCP)
+// is rejected with a clear error naming the valid providers.
+func TestParseUnknownProvider(t *testing.T) {
+	_, err := Parse("testdata/badprovider")
+	if err == nil {
+		t.Fatal("expected error for unknown deploy provider, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown deploy provider") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "unknown deploy provider")
+	}
+}
+
 func TestParseUnknownEnvBuilder(t *testing.T) {
 	_, err := Parse("testdata/badenv")
 	if err == nil {
@@ -138,7 +178,7 @@ func TestParseDynamicEnvDropped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse returned error: %v", err)
 	}
-	dev := cfg.Deploy.Stages["dev"]
+	dev := cfg.Deploy.Providers.AWS.Stages["dev"]
 	if _, ok := dev.ENV["PORT"]; !ok {
 		t.Error("static PORT should be present")
 	}

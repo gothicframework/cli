@@ -170,7 +170,7 @@ var Config = gothic.Config{
 	Runtime: gothic.RuntimeConfig{
 		CacheStrategy: gothic.CACHE_CONTROL_HEADERS,
 	},
-	Deploy: &gothic.DeployConfig{Region: "us-east-1"},
+	Deploy: &gothic.DeployConfig{Provider: gothic.AWS},
 }
 `
 	dir := t.TempDir()
