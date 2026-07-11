@@ -59,12 +59,16 @@ type Providers struct {
 }
 
 // AWSProvider mirrors config.AWSProvider: the AWS-specific deploy settings.
+// CDN reuses the user-facing config.CDNConfig type directly (like the per-stage
+// *config.EnvValue fields) so the CloudFront distribution knobs have a single
+// source of truth; the parser fills it and tfgen consumes it.
 type AWSProvider struct {
 	ServerMemory  int                     `json:"serverMemory"`
 	ServerTimeout int                     `json:"serverTimeout"`
 	Region        string                  `json:"region"`
 	Profile       string                  `json:"profile"`
 	Stages        map[string]EnvVariables `json:"stages"`
+	CDN           config.CDNConfig        `json:"cdn"`
 }
 type EnvVariables struct {
 	BucketName     string

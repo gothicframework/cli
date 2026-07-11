@@ -40,10 +40,9 @@ tmp
 optimize/*
 public/styles.css
 public/wasm/
-.gothicCli/wasm-cache.json
-.gothicCli/templ-cache.json
-.gothicCli/bin/
-infra/.tofu/`
+.gothicCli/
+infra/.tofu/
+gothic_outputs.json`
 
 type GothicCliData struct {
 	TemplateFiles                 map[string]embed.FS

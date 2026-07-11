@@ -38,6 +38,25 @@ var Config = gothic.Config{
 				ServerTimeout: 30,
 				Region:        "us-east-1",
 				Profile:       "default",
+				// CDN tunes how CloudFront caches + forwards the dynamic (server) requests:
+				// which query params, cookies and request headers reach your app AND vary
+				// its cache. The default (this block omitted) keeps ALL query params — so
+				// ?lang=PT and ?lang=ENG render and cache separately — and forwards no
+				// cookies or headers. Set each field with the gothic.Allow* builders:
+				//   gothic.AllowAll()                      — every value (the default)
+				//   gothic.AllowNone()                     — none
+				//   gothic.Allow("a", "b")                 — only these
+				//   gothic.AllowAllExcept("utm_source")    — all except these
+				//
+				// Headers accept only AllowNone() or Allow(...). ⚠ Never Allow the "Host"
+				// or "Authorization" header: CloudFront signs the Lambda Function URL
+				// (SigV4 via Origin Access Control) against the function URL's own host, so
+				// forwarding either header breaks the signature and returns HTTP 403.
+				// CDN: gothic.CDNConfig{
+				// 	QueryParams: gothic.AllowAll(), // default
+				// 	Cookies:     gothic.Allow("session"),
+				// 	Headers:     gothic.Allow("CloudFront-Viewer-Country"),
+				// },
 				Stages: map[string]gothic.Stage{
 					"dev": {
 						// Custom domain (optional). These 4 fields are source-aware like ENV:

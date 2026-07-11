@@ -168,7 +168,7 @@ func TestInitGitignoreV3Entries(t *testing.T) {
 		t.Fatalf("read .gitignore: %v", err)
 	}
 	content := string(gi)
-	for _, want := range []string{".gothicCli/bin/", "infra/.tofu/"} {
+	for _, want := range []string{".gothicCli/", "infra/.tofu/", "gothic_outputs.json"} {
 		if !strings.Contains(content, want) {
 			t.Errorf(".gitignore missing v3 entry %q", want)
 		}

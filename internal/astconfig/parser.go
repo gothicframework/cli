@@ -237,9 +237,78 @@ func parseAWSProvider(fset *token.FileSet, v ast.Expr) (cli.AWSProvider, error) 
 				return aws, err
 			}
 			aws.Stages = stages
+		case "CDN":
+			aws.CDN = parseCDN(kv.Value)
 		}
 	}
 	return aws, nil
+}
+
+// parseCDN reads a gothic.CDNConfig literal into config.CDNConfig. Each sub-field
+// (QueryParams/Cookies/Headers) is one of the gothic.Allow* builder calls
+// (AllowAll / AllowNone / Allow(...) / AllowAllExcept(...)). Unrecognized fields
+// are ignored, mirroring the rest of the static-literal parse contract.
+func parseCDN(v ast.Expr) config.CDNConfig {
+	cdn := config.CDNConfig{}
+	lit, ok := compositeLit(v)
+	if !ok {
+		return cdn
+	}
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		rule, ok := parseAllowRule(kv.Value)
+		if !ok {
+			continue
+		}
+		switch identName(kv.Key) {
+		case "QueryParams":
+			cdn.QueryParams = rule
+		case "Cookies":
+			cdn.Cookies = rule
+		case "Headers":
+			cdn.Headers = rule
+		}
+	}
+	return cdn
+}
+
+// parseAllowRule recognizes a gothic.Allow* builder call and reconstructs the
+// AllowRule by invoking the real builder with the parsed string-literal args — so
+// the config package stays the single source of truth for what each builder means.
+// A non-call or unrecognized builder returns ok=false (silently ignored, like a
+// dynamic expression elsewhere in the parse contract).
+func parseAllowRule(expr ast.Expr) (config.AllowRule, bool) {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return config.AllowRule{}, false
+	}
+	switch selectorName(call.Fun) {
+	case "AllowAll":
+		return config.AllowAll(), true
+	case "AllowNone":
+		return config.AllowNone(), true
+	case "Allow":
+		return config.Allow(stringArgs(call)...), true
+	case "AllowAllExcept":
+		return config.AllowAllExcept(stringArgs(call)...), true
+	default:
+		return config.AllowRule{}, false
+	}
+}
+
+// stringArgs collects every string-literal argument of a call, skipping any
+// non-literal (dynamic) argument — consistent with the static-only parse contract.
+func stringArgs(call *ast.CallExpr) []string {
+	var out []string
+	for _, a := range call.Args {
+		if s, ok := stringLit(a); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func parseStages(fset *token.FileSet, v ast.Expr) (map[string]cli.EnvVariables, error) {

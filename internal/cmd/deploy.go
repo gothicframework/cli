@@ -103,6 +103,14 @@ func (command *DeployCommand) Deploy(stage string, action string) error {
 
 	deployBanner(action, stage)
 
+	// Guard existing/migrated projects. The scaffold's .gitignore already excludes
+	// these, but a project created before that entry existed (or migrated from v2)
+	// would otherwise commit .gothicCli/ — which holds the OpenTofu provider
+	// binaries under tofu/<stage>/.terraform (hundreds of MB, over GitHub's 100 MB
+	// limit) — and gothic_outputs.json (deploy outputs that may carry sensitive
+	// values). Append any missing entry idempotently before we generate them.
+	ensureGitignore(".gothicCli/", "gothic_outputs.json")
+
 	// Front-end artifacts are compiled into the server binary and uploaded to S3,
 	// so they matter only for a deploy — a teardown needs none of them. Build them
 	// first (and only here) so a local build failure aborts before we touch AWS.
@@ -209,6 +217,54 @@ func (command *DeployCommand) Deploy(stage string, action string) error {
 		printDeleteSummary(stage)
 	}
 	return nil
+}
+
+// ensureGitignore appends any of the given entries that are not already present
+// to the project's .gitignore, creating the file if it does not exist. It is
+// idempotent and best-effort: a missing or unwritable .gitignore is never fatal
+// to a deploy (the entries are a safety net, not a hard requirement), so all
+// errors are swallowed. A `git`-tracked entry that already exists is left as-is.
+func ensureGitignore(entries ...string) {
+	const path = ".gitignore"
+
+	existing := map[string]bool{}
+	content, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return // unreadable for a reason other than absence — don't touch it
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		existing[strings.TrimSpace(line)] = true
+	}
+
+	var missing []string
+	for _, e := range entries {
+		if !existing[e] {
+			missing = append(missing, e)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+
+	// Open for append (create if absent). Ensure the additions start on their own
+	// line even when the file lacks a trailing newline.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	var b strings.Builder
+	if len(content) > 0 && !strings.HasSuffix(string(content), "\n") {
+		b.WriteString("\n")
+	}
+	for _, e := range missing {
+		b.WriteString(e)
+		b.WriteString("\n")
+	}
+	if _, err := f.WriteString(b.String()); err == nil {
+		fmt.Println(paint(clrDim, "  added "+strings.Join(missing, ", ")+" to .gitignore"))
+	}
 }
 
 // declaredStagesHint renders the " Declared stages: a, b, c." suffix (or a hint

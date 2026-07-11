@@ -134,6 +134,8 @@ github.com/gothicframework/core v1.0.0 h1:6S9bSpd36NqNE/f7ysjdg1/rWxsA1jPr349GCO
 github.com/gothicframework/core v1.0.0/go.mod h1:nv5ybhMfA2bh/qedzSPwFsbjOSTUI1z543UYHCSIbis=
 github.com/gothicframework/core v1.1.0 h1:ROnEMWfVpdrmOPA+XrlflsohlDx3cvtn009VxR3mYm8=
 github.com/gothicframework/core v1.1.0/go.mod h1:nv5ybhMfA2bh/qedzSPwFsbjOSTUI1z543UYHCSIbis=
+github.com/gothicframework/core v1.2.0 h1:Wntwg2otfYsSao3eLYD6FFDNcTc8hTyKZgyDOE37GW0=
+github.com/gothicframework/core v1.2.0/go.mod h1:nv5ybhMfA2bh/qedzSPwFsbjOSTUI1z543UYHCSIbis=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 h1:5VipnvEpbqr2gA2VbM+nYVbkIF28c5ZQfqCBQ5g2xfk=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0/go.mod h1:Hyl3n6Twe1hvtd9XUXDec4pTvgMSEixRuQKPTMH2bNs=
 github.com/hashicorp/go-cleanhttp v0.5.2 h1:035FKYIWjmULyFRBKPs8TBQoi0x6d9G4xc9neXJWAZQ=

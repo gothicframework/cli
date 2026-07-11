@@ -167,6 +167,9 @@ func (e *TofuAwsEngine) buildTfGenParams() tfgen.TfGenParams {
 		StateBucket:   e.stateBucket,
 		LockTable:     e.lockTable,
 		EnvVars:       map[string]config.EnvValue{},
+		// CloudFront distribution knobs (allowed query params / cookies / headers) for
+		// the dynamic Lambda behavior. Zero value = all query params, no cookies/headers.
+		CDN: aws.CDN,
 		// Custom user infrastructure lives in a cwd-relative "infra/" dir, mirroring
 		// the "public/" asset convention: the deploy runs from the project root, so
 		// every *.tf / *.tf.json inside it is merged into the same OpenTofu stack.
@@ -309,8 +312,11 @@ func (e *TofuAwsEngine) Build(ctx context.Context, tag string) (string, error) {
 	return uri + ":" + tag, nil
 }
 
-// Deploy runs tofu init + apply, reads the stack outputs, writes them to
-// gothic_outputs.json at the project root, and returns them as a string map.
+// Deploy runs tofu init + apply, reads the stack outputs, and returns them as a
+// string map. The outputs are NOT written to disk: they can carry sensitive
+// values (ARNs, domains) and were previously persisted to gothic_outputs.json at
+// the project root, which risked leaking into git. cmd/deploy.go prints them in a
+// clean summary instead, and nothing in the codebase reads them back from a file.
 func (e *TofuAwsEngine) Deploy(ctx context.Context) (map[string]string, error) {
 	if err := e.initTofu(ctx); err != nil {
 		return nil, err
@@ -369,9 +375,6 @@ func (e *TofuAwsEngine) Deploy(ctx context.Context) (map[string]string, error) {
 		outputs[k] = strings.Trim(string(v.Value), "\"")
 	}
 
-	if data, err := json.MarshalIndent(outputs, "", "  "); err == nil {
-		_ = os.WriteFile("gothic_outputs.json", data, 0644)
-	}
 	return outputs, nil
 }
 

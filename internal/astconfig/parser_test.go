@@ -208,6 +208,35 @@ func TestHasHook(t *testing.T) {
 	}
 }
 
+// TestParseCDN verifies the CDN block parses into the internal config via the
+// gothic.Allow* builders: an omitted field stays unset (Behavior ""), and an
+// Allow(...) whitelist captures its names.
+func TestParseCDN(t *testing.T) {
+	cfg, err := Parse("testdata/cdn")
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	cdn := cfg.Deploy.Providers.AWS.CDN
+
+	if b := cdn.QueryParams.Behavior(); b != "" {
+		t.Errorf("QueryParams.Behavior() = %q, want \"\" (unset → field default) when omitted", b)
+	}
+
+	if b := cdn.Cookies.Behavior(); b != "whitelist" {
+		t.Errorf("Cookies.Behavior() = %q, want whitelist", b)
+	}
+	if got, want := strings.Join(cdn.Cookies.Items(), ","), "session,theme"; got != want {
+		t.Errorf("Cookies.Items() = %q, want %q", got, want)
+	}
+
+	if b := cdn.Headers.Behavior(); b != "whitelist" {
+		t.Errorf("Headers.Behavior() = %q, want whitelist", b)
+	}
+	if got, want := strings.Join(cdn.Headers.Items(), ","), "CloudFront-Viewer-Country"; got != want {
+		t.Errorf("Headers.Items() = %q, want %q", got, want)
+	}
+}
+
 func TestParseMissingFile(t *testing.T) {
 	_, err := Parse("testdata/does-not-exist")
 	if err == nil {

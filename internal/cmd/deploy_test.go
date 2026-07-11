@@ -246,5 +246,56 @@ func TestPromptDeleteRemoteStatePromptMentionsResources(t *testing.T) {
 	}
 }
 
+// TestEnsureGitignoreCreatesFile: with no .gitignore present, ensureGitignore
+// creates one containing exactly the requested entries.
+func TestEnsureGitignoreCreatesFile(t *testing.T) {
+	chdirTemp(t)
+	ensureGitignore(".gothicCli/", "gothic_outputs.json")
+	b, err := os.ReadFile(".gitignore")
+	if err != nil {
+		t.Fatalf("expected .gitignore to be created: %v", err)
+	}
+	content := string(b)
+	for _, want := range []string{".gothicCli/", "gothic_outputs.json"} {
+		if !strings.Contains(content, want) {
+			t.Errorf(".gitignore missing %q; got:\n%s", want, content)
+		}
+	}
+}
+
+// TestEnsureGitignoreAppendsMissingOnly: an existing .gitignore keeps its lines,
+// gains only the entries it lacks, and is not duplicated on a second call. Also
+// verifies a file without a trailing newline gets one before the appended lines.
+func TestEnsureGitignoreAppendsMissingOnly(t *testing.T) {
+	chdirTemp(t)
+	// Pre-existing file: already ignores .gothicCli/ but NOT gothic_outputs.json,
+	// and deliberately has no trailing newline.
+	if err := os.WriteFile(".gitignore", []byte(".env\n.gothicCli/"), 0644); err != nil {
+		t.Fatalf("seed .gitignore: %v", err)
+	}
+
+	ensureGitignore(".gothicCli/", "gothic_outputs.json")
+
+	b, _ := os.ReadFile(".gitignore")
+	content := string(b)
+	if strings.Count(content, ".gothicCli/") != 1 {
+		t.Errorf(".gothicCli/ should not be duplicated; got:\n%s", content)
+	}
+	if !strings.Contains(content, "\ngothic_outputs.json") {
+		t.Errorf("gothic_outputs.json should be appended on its own line; got:\n%s", content)
+	}
+	if !strings.Contains(content, ".env") {
+		t.Errorf("existing entries must be preserved; got:\n%s", content)
+	}
+
+	// Idempotent: a second call adds nothing.
+	before := content
+	ensureGitignore(".gothicCli/", "gothic_outputs.json")
+	b2, _ := os.ReadFile(".gitignore")
+	if string(b2) != before {
+		t.Errorf("ensureGitignore not idempotent:\nbefore:\n%s\nafter:\n%s", before, string(b2))
+	}
+}
+
 // TestDeploySetupCustomDomainNonUsEast1RequiresArn covered the v2 setup()
 // method removed in Phase 6. Replacement test in Phase 9.

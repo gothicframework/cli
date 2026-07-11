@@ -463,6 +463,145 @@ func TestMergeUserInfraAbsent(t *testing.T) {
 	}
 }
 
+// cachePolicyParams decodes gothic_cache_policy.tf.json's
+// parameters_in_cache_key_and_forwarded_to_origin object from a prepared workdir.
+func cachePolicyParams(t *testing.T, dir string) map[string]any {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, "gothic_cache_policy.tf.json"))
+	if err != nil {
+		t.Fatalf("read gothic_cache_policy.tf.json: %v", err)
+	}
+	var doc struct {
+		Resource struct {
+			Policy map[string]struct {
+				Params map[string]any `json:"parameters_in_cache_key_and_forwarded_to_origin"`
+			} `json:"aws_cloudfront_cache_policy"`
+		} `json:"resource"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("unmarshal cache policy: %v", err)
+	}
+	server, ok := doc.Resource.Policy["server"]
+	if !ok {
+		t.Fatal("cache policy has no aws_cloudfront_cache_policy.server")
+	}
+	return server.Params
+}
+
+// TestCachePolicyDefaults: a zero-value CDN keeps ALL query params and no
+// cookies/headers, and emits no items sub-block.
+func TestCachePolicyDefaults(t *testing.T) {
+	dir := prepareInto(t, minimalParams())
+	p := cachePolicyParams(t, dir)
+
+	qs := p["query_strings_config"].(map[string]any)
+	if qs["query_string_behavior"] != "all" {
+		t.Errorf("query_string_behavior = %v, want all (default)", qs["query_string_behavior"])
+	}
+	if _, hasItems := qs["query_strings"]; hasItems {
+		t.Error("query_strings items block must be absent for behavior all")
+	}
+	if c := p["cookies_config"].(map[string]any); c["cookie_behavior"] != "none" {
+		t.Errorf("cookie_behavior = %v, want none (default)", c["cookie_behavior"])
+	}
+	if h := p["headers_config"].(map[string]any); h["header_behavior"] != "none" {
+		t.Errorf("header_behavior = %v, want none (default)", h["header_behavior"])
+	}
+}
+
+// TestCachePolicyCommentUnderAWSLimit: AWS rejects a CloudFront cache-policy whose
+// Comment exceeds 128 chars ("The parameter Comment is too big"). Lock the length.
+func TestCachePolicyCommentUnderAWSLimit(t *testing.T) {
+	dir := prepareInto(t, minimalParams())
+	b, err := os.ReadFile(filepath.Join(dir, "gothic_cache_policy.tf.json"))
+	if err != nil {
+		t.Fatalf("read cache policy: %v", err)
+	}
+	var doc struct {
+		Resource struct {
+			Policy map[string]struct {
+				Comment string `json:"comment"`
+			} `json:"aws_cloudfront_cache_policy"`
+		} `json:"resource"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	comment := doc.Resource.Policy["server"].Comment
+	if comment == "" {
+		t.Fatal("cache policy comment is empty")
+	}
+	if len(comment) > 128 {
+		t.Errorf("cache policy comment is %d chars (AWS max 128): %q", len(comment), comment)
+	}
+}
+
+// TestCachePolicyWhitelist: gothic.Allow(...) emits a whitelist + items sub-block.
+func TestCachePolicyWhitelist(t *testing.T) {
+	params := minimalParams()
+	params.CDN = config.CDNConfig{
+		QueryParams: config.Allow("lang", "page"),
+		Cookies:     config.AllowNone(),
+		Headers:     config.Allow("CloudFront-Viewer-Country"),
+	}
+	dir := prepareInto(t, params)
+	p := cachePolicyParams(t, dir)
+
+	qs := p["query_strings_config"].(map[string]any)
+	if qs["query_string_behavior"] != "whitelist" {
+		t.Fatalf("query_string_behavior = %v, want whitelist", qs["query_string_behavior"])
+	}
+	items := qs["query_strings"].(map[string]any)["items"].([]any)
+	if len(items) != 2 || items[0] != "lang" || items[1] != "page" {
+		t.Errorf("query_strings.items = %v, want [lang page]", items)
+	}
+	h := p["headers_config"].(map[string]any)
+	if h["header_behavior"] != "whitelist" || h["headers"].(map[string]any)["items"].([]any)[0] != "CloudFront-Viewer-Country" {
+		t.Errorf("headers_config = %v, want whitelist of CloudFront-Viewer-Country", h)
+	}
+}
+
+// TestCachePolicyAllExcept: gothic.AllowAllExcept(...) emits allExcept + items.
+func TestCachePolicyAllExcept(t *testing.T) {
+	params := minimalParams()
+	params.CDN = config.CDNConfig{QueryParams: config.AllowAllExcept("utm_source")}
+	dir := prepareInto(t, params)
+	qs := cachePolicyParams(t, dir)["query_strings_config"].(map[string]any)
+	if qs["query_string_behavior"] != "allExcept" {
+		t.Fatalf("query_string_behavior = %v, want allExcept", qs["query_string_behavior"])
+	}
+	if qs["query_strings"].(map[string]any)["items"].([]any)[0] != "utm_source" {
+		t.Errorf("query_strings.items = %v, want [utm_source]", qs["query_strings"])
+	}
+}
+
+// TestCachePolicyHeadersAllRejected: CloudFront cache policies forbid all/allExcept
+// for headers, so generation must fail with a clear message.
+func TestCachePolicyHeadersAllRejected(t *testing.T) {
+	params := minimalParams()
+	params.CDN = config.CDNConfig{Headers: config.AllowAll()}
+	err := NewGenerator().Prepare(t.TempDir(), params)
+	if err == nil {
+		t.Fatal("expected an error for header behavior all")
+	}
+	if !strings.Contains(err.Error(), "Headers") || !strings.Contains(err.Error(), "Allow(") {
+		t.Errorf("error should explain headers can't be AllowAll, got: %v", err)
+	}
+}
+
+// TestCachePolicyWhitelistNeedsItems: Allow() with no names is a config error.
+func TestCachePolicyWhitelistNeedsItems(t *testing.T) {
+	params := minimalParams()
+	params.CDN = config.CDNConfig{QueryParams: config.Allow()}
+	err := NewGenerator().Prepare(t.TempDir(), params)
+	if err == nil {
+		t.Fatal("expected an error for Allow() with no names")
+	}
+	if !strings.Contains(err.Error(), "QueryParams") || !strings.Contains(err.Error(), "at least one name") {
+		t.Errorf("error should mention QueryParams needs at least one name, got: %v", err)
+	}
+}
+
 func writeFixture(t *testing.T, dir, name, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {

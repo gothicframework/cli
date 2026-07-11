@@ -41,6 +41,12 @@ type TfGenParams struct {
 	HostedZoneId   *config.EnvValue
 	CertificateArn *config.EnvValue
 
+	// CDN drives the generated aws_cloudfront_cache_policy.server (which query params,
+	// cookies, and headers the dynamic/Lambda behavior folds into the cache key and
+	// forwards to the origin). Its zero value = all query params, no cookies, no
+	// headers. See writeCachePolicy.
+	CDN config.CDNConfig
+
 	// InfraDir is the user's custom-infrastructure directory (cwd-relative, like
 	// the "public/" asset dir). Every *.tf / *.tf.json file directly inside it is
 	// merged flat into workDir so the user's resources land in the SAME module +
@@ -63,6 +69,7 @@ var gothicReservedNames = map[string]bool{
 	"gothic_vars.auto.tfvars.json":  true,
 	"env_resolved.tf.json":          true,
 	"gothic_image.auto.tfvars.json": true,
+	"gothic_cache_policy.tf.json":   true,
 }
 
 // Generator materialises an OpenTofu working directory for the AWS Gothic stack.
@@ -76,6 +83,7 @@ func NewGenerator() *Generator { return &Generator{} }
 //   - a generated vars.tf.json supplying concrete defaults for every variable
 //   - a generated env_resolved.tf.json resolving env-var sources (raw/SSM/Secrets Manager)
 //   - a gothic_outputs.tf.json placeholder
+//   - a generated gothic_cache_policy.tf.json (the CloudFront server cache policy)
 //
 // It NEVER writes to the user's project directory; only workDir is touched.
 func (g *Generator) Prepare(workDir string, params TfGenParams) error {
@@ -93,6 +101,9 @@ func (g *Generator) Prepare(workDir string, params TfGenParams) error {
 		return err
 	}
 	if err := g.writeGothicOutputs(workDir); err != nil {
+		return err
+	}
+	if err := g.writeCachePolicy(workDir, params); err != nil {
 		return err
 	}
 	// User infra is merged LAST so the collision guard sees the full set of
@@ -123,6 +134,97 @@ func (g *Generator) writeGothicOutputs(workDir string) error {
 	}
 	return writeJSON(filepath.Join(workDir, "gothic_outputs.tf.json"), map[string]any{"locals": locals})
 }
+
+// writeCachePolicy generates gothic_cache_policy.tf.json: the
+// aws_cloudfront_cache_policy.server resource for the dynamic (Lambda) behavior.
+// It is generated here rather than embedded statically so the query-param, cookie,
+// and header knobs from Deploy.Providers.AWS.CDN drive the cache key (and what
+// CloudFront forwards to the origin). The distribution in the embedded
+// resources.tf.json references it by ${aws_cloudfront_cache_policy.server.id};
+// OpenTofu resolves that across files in the same working dir.
+//
+// Defaults (zero-value CDN): all query params in the key, no cookies, no headers —
+// identical to the previous static policy. min/max/default TTL honor origin
+// Cache-Control so ISR keeps working. Accept-Encoding is left out of the key
+// (brotli/gzip both false) to avoid fragmenting the SSR cache.
+func (g *Generator) writeCachePolicy(workDir string, params TfGenParams) error {
+	cdn := params.CDN
+
+	queryCfg, err := cacheKeyBlock("query_string", "QueryParams", ruleBehavior(cdn.QueryParams, "all"), cdn.QueryParams.Items())
+	if err != nil {
+		return err
+	}
+	cookieCfg, err := cacheKeyBlock("cookie", "Cookies", ruleBehavior(cdn.Cookies, "none"), cdn.Cookies.Items())
+	if err != nil {
+		return err
+	}
+	// CloudFront cache policies accept only "none" or "whitelist" for headers — "all"
+	// and "allExcept" are rejected by the AWS API. Guard here with a clear message
+	// rather than surfacing an opaque apply-time error.
+	headerBehavior := ruleBehavior(cdn.Headers, "none")
+	if headerBehavior == "all" || headerBehavior == "allExcept" {
+		return fmt.Errorf("CDN.Headers cannot be AllowAll()/AllowAllExcept() — CloudFront cache policies only allow headers via AllowNone() or Allow(...); got %q behavior", headerBehavior)
+	}
+	headerCfg, err := cacheKeyBlock("header", "Headers", headerBehavior, cdn.Headers.Items())
+	if err != nil {
+		return err
+	}
+
+	policy := map[string]any{
+		"name": "${var.project_name}-${var.stage}-server-cache-policy",
+		// AWS caps CloudFront cache-policy Comment at 128 chars — keep this short.
+		"comment":     "Gothic server behavior: honor origin Cache-Control (ISR); cache key/forwarding per Deploy.Providers.AWS.CDN",
+		"default_ttl": 0,
+		"min_ttl":     0,
+		"max_ttl":     31536000,
+		"parameters_in_cache_key_and_forwarded_to_origin": map[string]any{
+			"enable_accept_encoding_brotli": false,
+			"enable_accept_encoding_gzip":   false,
+			"cookies_config":                cookieCfg,
+			"headers_config":                headerCfg,
+			"query_strings_config":          queryCfg,
+		},
+	}
+	doc := map[string]any{
+		"resource": map[string]any{
+			"aws_cloudfront_cache_policy": map[string]any{
+				"server": policy,
+			},
+		},
+	}
+	return writeJSON(filepath.Join(workDir, "gothic_cache_policy.tf.json"), doc)
+}
+
+// ruleBehavior returns an AllowRule's CloudFront behavior string, substituting the
+// per-field default ("all" for query params, "none" for cookies/headers) when the
+// rule is unset (zero value).
+func ruleBehavior(r config.AllowRule, dflt string) string {
+	if b := r.Behavior(); b != "" {
+		return b
+	}
+	return dflt
+}
+
+// cacheKeyBlock builds one *_config block (cookies_config / headers_config /
+// query_strings_config) for the cache policy. kind is the singular noun used for
+// both the behavior key ("<kind>_behavior") and the nested items block
+// ("<kind>s" — query_strings/cookies/headers); field is the user-facing CDN field
+// name for error messages. The items block is included ONLY for whitelist /
+// allExcept, and those behaviors require a non-empty name list.
+func cacheKeyBlock(kind, field, behavior string, items []string) (map[string]any, error) {
+	block := map[string]any{kind + "_behavior": behavior}
+	if behavior == "whitelist" || behavior == "allExcept" {
+		if len(items) == 0 {
+			return nil, fmt.Errorf("CDN.%s uses Allow(...)/AllowAllExcept(...) but names no values: pass at least one name, e.g. gothic.Allow(\"lang\")", field)
+		}
+		// Pluralize the item-block key: query_string→query_strings, cookie→cookies,
+		// header→headers.
+		block[kind+"s"] = map[string]any{"items": items}
+	}
+	return block, nil
+}
+
+// mergeUserInfra copies every *.tf / *.tf.json file directly inside infraDir into
 
 // mergeUserInfra copies every *.tf / *.tf.json file directly inside infraDir into
 // workDir using a flat layout (base name only), so the user's resources join the
