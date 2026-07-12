@@ -76,6 +76,9 @@ func TestParseFull(t *testing.T) {
 	if cfg.OptimizeImages.LowResolutionRate != 20 {
 		t.Errorf("LowResolutionRate = %d, want 20", cfg.OptimizeImages.LowResolutionRate)
 	}
+	if cfg.OptimizeImages.Quality != 82 {
+		t.Errorf("Quality = %d, want 82", cfg.OptimizeImages.Quality)
+	}
 	if cfg.Deploy == nil {
 		t.Fatal("Deploy is nil")
 	}

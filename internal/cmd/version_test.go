@@ -57,12 +57,13 @@ func TestVersionCommandPrintsCurrentVersion(t *testing.T) {
 }
 
 // TestCurrentVersionFormat encodes the real format contract: CURRENT_VERSION
-// must be a semantic version of the shape vMAJOR.MINOR.PATCH. This matters
-// because migrate-v2 seeds go.mod requires with this value, which must be a
-// version the Go module registry can resolve.
+// must be a semantic version of the shape vMAJOR.MINOR.PATCH, optionally with a
+// prerelease suffix (e.g. -beta.1 / -rc.1). This matters because migrate-v2
+// seeds go.mod requires with this value, which must be a version the Go module
+// registry can resolve — and Go modules accept semver prereleases.
 func TestCurrentVersionFormat(t *testing.T) {
-	semver := regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+	semver := regexp.MustCompile(`^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`)
 	if !semver.MatchString(CURRENT_VERSION) {
-		t.Errorf("CURRENT_VERSION %q must match vMAJOR.MINOR.PATCH", CURRENT_VERSION)
+		t.Errorf("CURRENT_VERSION %q must match vMAJOR.MINOR.PATCH[-prerelease]", CURRENT_VERSION)
 	}
 }

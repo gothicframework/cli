@@ -54,7 +54,7 @@ var IndexConfig = routes.RouteConfig[IndexPageProps]{
 templ Index(props IndexPageProps) {
 	@layouts.PageLayout() {
 		<div class="sm:w-[300px] sm:h-[300px] w-[200px] h-[200px] my-10 rounded-full animate-pulse overflow-clip">
-			@gothicComponents.OptimizedImage(gothicComponents.OptimizedImageProps{true, "imageExample", "png", "Gothic Framework Logo"})
+			@gothicComponents.OptimizedImage(gothicComponents.OptimizedImageProps{IsFirstLoad: true, ImgName: "imageExample", ImgExtension: "png", Alt: "Gothic Framework Logo"})
 		</div>
 		@components.HelloWorld(nil)
 		<div class="flex flex-col justify-center items-center max-w-xl text-center">

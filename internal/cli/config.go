@@ -34,6 +34,7 @@ type Config struct {
 	WasmTinyGoVersion string `json:"wasmTinyGoVersion,omitempty"`
 	OptimizeImages    struct {
 		LowResolutionRate int `json:"lowResolutionRate"`
+		Quality           int `json:"quality"`
 	} `json:"optimizeImages"`
 	Deploy *DeployConfig `json:"deploy"`
 }

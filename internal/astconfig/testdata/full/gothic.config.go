@@ -13,6 +13,7 @@ var Config = gothic.Config{
 	TailwindBinary: "/opt/tailwind/tailwindcss",
 	OptimizeImages: gothic.OptimizeImagesConfig{
 		LowResolutionRate: 20,
+		Quality:           82,
 	},
 	Deploy: &gothic.DeployConfig{
 		Provider: gothic.AWS,

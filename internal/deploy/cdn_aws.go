@@ -113,9 +113,10 @@ func (c *CloudFrontCDN) uploadObject(ctx context.Context, bucketName, key, path 
 	defer f.Close()
 
 	input := &s3.PutObjectInput{
-		Bucket: aws.String(bucketName),
-		Key:    aws.String(key),
-		Body:   f,
+		Bucket:       aws.String(bucketName),
+		Key:          aws.String(key),
+		Body:         f,
+		CacheControl: aws.String(cacheControlForKey(key)),
 	}
 
 	switch {
@@ -141,6 +142,29 @@ func (c *CloudFrontCDN) uploadObject(ctx context.Context, bucketName, key, path 
 		return fmt.Errorf("uploading %q: %w", key, err)
 	}
 	return nil
+}
+
+// cacheControlForKey returns the Cache-Control header stored on each uploaded S3
+// object. Without one, CloudFront (CachingOptimized) serves the /public/* assets
+// with no browser TTL — Lighthouse's "Use efficient cache lifetimes" audit then
+// flags every asset as uncached.
+//
+//   - Media (images) are content-stable and the heaviest payload, so they are
+//     cached immutably for a year (the biggest win). If you ever replace an image
+//     under the same key, rely on the per-deploy CloudFront /* invalidation for the
+//     edge, or rename it to bust returning browsers.
+//   - Everything else (styles.css, the per-page .wasm[.br|.gz], etc.) can change on
+//     the next deploy under the SAME key, and browsers ignore CloudFront
+//     invalidations, so `immutable` would pin a stale asset. These get a 1-day TTL
+//     with a week of stale-while-revalidate — a real TTL that stays safe across
+//     deploys.
+func cacheControlForKey(key string) string {
+	switch strings.ToLower(filepath.Ext(key)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg", ".ico":
+		return "public, max-age=31536000, immutable"
+	default:
+		return "public, max-age=86400, stale-while-revalidate=604800"
+	}
 }
 
 // RemoveAssets deletes every object in bucketName, batching deletes into the

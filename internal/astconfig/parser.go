@@ -82,9 +82,14 @@ func Parse(projectRoot string) (*cli.Config, error) {
 					if !ok {
 						continue
 					}
-					if identName(ekv.Key) == "LowResolutionRate" {
+					switch identName(ekv.Key) {
+					case "LowResolutionRate":
 						if n, ok := intLit(ekv.Value); ok {
 							cfg.OptimizeImages.LowResolutionRate = n
+						}
+					case "Quality":
+						if n, ok := intLit(ekv.Value); ok {
+							cfg.OptimizeImages.Quality = n
 						}
 					}
 				}
