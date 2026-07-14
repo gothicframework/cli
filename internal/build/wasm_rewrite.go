@@ -140,6 +140,101 @@ func astRewriteAutoKeys(src string) (string, error) {
 	return out, nil
 }
 
+// rewriteDecodeCalls rewrites every `Decode[T](...)` generic call in a
+// ClientSideState body to the generated `_jsonDecode_<Ident>(...)` entry point,
+// for each T whose sanitized identifier is in rootIdents. The runtime WASM build
+// has NO `Decode` symbol (it lives only in the server-side stub,
+// core/wasm/stubs.go), so every detected Decode call MUST be rewritten or the
+// TinyGo/Go build fails with "undefined: Decode". Both bare (`Decode[User]`) and
+// qualified (`Decode[api.Echo]`) type arguments are handled — the callee's type
+// argument is rendered to source text and sanitized the same way detection
+// computed the ident, so they agree. Returns a positioned error on AST parse
+// failure.
+func (h *WasmHelper) rewriteDecodeCalls(src string, rootIdents map[string]bool) (string, error) {
+	return astRewriteTypedCalls(src, rootIdents, "Decode", "_jsonDecode_")
+}
+
+// rewriteEncodeCalls rewrites every `Encode[T](...)` generic call in a
+// ClientSideState body to the generated `_jsonEncode_<Ident>(...)` entry point,
+// for each T whose sanitized identifier is in rootIdents. Same contract as
+// rewriteDecodeCalls — the runtime build has no `Encode` symbol, so every
+// detected Encode call MUST be rewritten.
+func (h *WasmHelper) rewriteEncodeCalls(src string, rootIdents map[string]bool) (string, error) {
+	return astRewriteTypedCalls(src, rootIdents, "Encode", "_jsonEncode_")
+}
+
+// astRewriteTypedCalls performs the surgical byte-offset rewrite behind
+// rewriteDecodeCalls / rewriteEncodeCalls. It is modeled on astRewriteAutoKeys:
+// an AST walk locates each qualifying `<funcName>[T](...)` call and its callee
+// span, then edits are applied in reverse offset order so earlier edits' offsets
+// stay valid. Only the callee expression `<funcName>[T]` is replaced with
+// `<targetPrefix><Ident>`; the original argument list is preserved verbatim. Both
+// bare-identifier and qualified-selector type arguments are handled — the type
+// argument is rendered to source text and sanitized the same way detection
+// computed the ident, so they agree.
+func astRewriteTypedCalls(src string, rootIdents map[string]bool, funcName, targetPrefix string) (string, error) {
+	if len(rootIdents) == 0 {
+		return src, nil
+	}
+	const prefix = "package _x\nfunc _f() {\n"
+	const suffix = "\n}\n"
+	wrapped := prefix + src + suffix
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "", wrapped, parser.ParseComments)
+	if err != nil {
+		if list, ok := err.(scanner.ErrorList); ok && len(list) > 0 {
+			e := list[0]
+			return "", fmt.Errorf("%s: %s", e.Pos.String(), e.Msg)
+		}
+		return "", err
+	}
+
+	type edit struct {
+		start, end int
+		repl       string
+	}
+	var edits []edit
+
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		nameIdent, typeArg := decodeFuncNameIdent(call.Fun)
+		if nameIdent == nil || nameIdent.Name != funcName {
+			return true
+		}
+		// Accept a bare identifier or a qualified selector type argument; render
+		// it and sanitize to the same ident detection computed.
+		switch typeArg.(type) {
+		case *ast.Ident, *ast.SelectorExpr:
+		default:
+			return true
+		}
+		ident := sanitizeTypeIdent(renderExpr(fset, typeArg))
+		if !rootIdents[ident] {
+			return true
+		}
+		start := fset.Position(call.Fun.Pos()).Offset - len(prefix)
+		end := fset.Position(call.Fun.End()).Offset - len(prefix)
+		if start < 0 || end < start || end > len(src) {
+			return true
+		}
+		edits = append(edits, edit{start: start, end: end, repl: targetPrefix + ident})
+		return true
+	})
+
+	if len(edits) == 0 {
+		return src, nil
+	}
+	sort.Slice(edits, func(i, j int) bool { return edits[i].start > edits[j].start })
+	out := src
+	for _, e := range edits {
+		out = out[:e.start] + e.repl + out[e.end:]
+	}
+	return out, nil
+}
+
 // firstPositionedError extracts the first parser/scanner error from one of two
 // candidate parse failures (the top-level retry and the func-body retry) and
 // returns a positioned error string. The wrapperLen is subtracted from line

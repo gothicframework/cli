@@ -251,7 +251,7 @@ func TestParseFieldTag(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotGothic, gotName, gotCompr := h.parseFieldTag(tt.input)
+			gotGothic, gotName, _, gotCompr := h.parseFieldTag(tt.input)
 			if gotGothic != tt.wantGothic {
 				t.Errorf("gothic: got %q, want %q", gotGothic, tt.wantGothic)
 			}

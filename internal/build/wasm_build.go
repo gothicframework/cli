@@ -73,7 +73,33 @@ func (h *WasmHelper) GeneratePage(page WasmPage, outDir string, warnOnce *sync.O
 		fmt.Fprintf(os.Stderr, "wasm: rewrite topic calls %s: %v\n", page.SourceFile, err)
 		os.Exit(1)
 	}
-	if err := h.writeWasmMain(page.SourceFile, body, page.Imports, page.Helpers, topicSnippets, topicStructs, topicAliases, topicRefAliases, page.Multiplexed, mainPath); err != nil {
+	// Phase 6: rewrite Decode[T](resp) → _jsonDecode_<Ident>(resp). The runtime
+	// build has no Decode symbol, so this must run for every page that calls
+	// Decode[T].
+	if len(page.JSONDecodeRoots) > 0 {
+		rootIdents := make(map[string]bool, len(page.JSONDecodeRoots))
+		for _, r := range page.JSONDecodeRoots {
+			rootIdents[r.Ident] = true
+		}
+		body, err = h.rewriteDecodeCalls(body, rootIdents)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "wasm: rewrite decode calls %s: %v\n", page.SourceFile, err)
+			os.Exit(1)
+		}
+	}
+	// Phase 7: rewrite Encode[T](v) → _jsonEncode_<Ident>(v).
+	if len(page.JSONEncodeRoots) > 0 {
+		rootIdents := make(map[string]bool, len(page.JSONEncodeRoots))
+		for _, r := range page.JSONEncodeRoots {
+			rootIdents[r.Ident] = true
+		}
+		body, err = h.rewriteEncodeCalls(body, rootIdents)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "wasm: rewrite encode calls %s: %v\n", page.SourceFile, err)
+			os.Exit(1)
+		}
+	}
+	if err := h.writeWasmMain(page.SourceFile, body, page.Imports, page.Helpers, topicSnippets, topicStructs, topicAliases, topicRefAliases, page.JSONDecodeTypes, page.JSONDecodeRoots, page.JSONEncodeTypes, page.JSONEncodeRoots, page.Multiplexed, mainPath); err != nil {
 		return err
 	}
 
@@ -154,7 +180,7 @@ func (h *WasmHelper) GeneratePage(page WasmPage, outDir string, warnOnce *sync.O
 // them into the WASM cache hash (see wasm_cache.go). This way a recipe change — e.g.
 // the -gc conservative switch — can never silently reuse a stale cached binary.
 var (
-	tinygoWasmFlags = []string{"build", "-no-debug", "-opt=z", "-target", "wasm", "-gc", "conservative"}
+	tinygoWasmFlags = []string{"build", "-no-debug", "-opt=z", "-target", "wasm", "-gc", "precise"}
 	goWasmFlags     = []string{"build", "-ldflags=-s -w", "-trimpath"}
 	goWasmEnv       = []string{"GOOS=js", "GOARCH=wasm"}
 )
@@ -574,7 +600,7 @@ func (h *WasmHelper) buildTopicManager(s structInfo, snippets []string, allStruc
 	return nil
 }
 
-func (h *WasmHelper) writeWasmMain(src, body string, stdImports []string, helpers []string, topicSnippets []string, topicStructs []structInfo, aliases map[string]string, refAliases map[string]typeRef, multiplexed bool, dest string) error {
+func (h *WasmHelper) writeWasmMain(src, body string, stdImports []string, helpers []string, topicSnippets []string, topicStructs []structInfo, aliases map[string]string, refAliases map[string]typeRef, jsonReaders []jsonReaderType, jsonRoots []jsonRootRef, jsonWriters []jsonReaderType, jsonEncodeRoots []jsonRootRef, multiplexed bool, dest string) error {
 	codecs, err := h.buildCodecData(topicStructs, aliases, refAliases)
 	if err != nil {
 		return fmt.Errorf("wasm: codec: %w", err)
@@ -582,6 +608,26 @@ func (h *WasmHelper) writeWasmMain(src, body string, stdImports []string, helper
 	wasmFuncs, err := h.buildWasmTopicFuncData(topicStructs, aliases, refAliases)
 	if err != nil {
 		return fmt.Errorf("wasm: topic func data: %w", err)
+	}
+	// Phase 6: reflection-free Decode[T] readers + entry points.
+	jsonReaderData, jsonDecoderData := h.buildJSONDecodeData(jsonReaders, jsonRoots)
+	// Phase 7: reflection-free Encode[T] writers + entry points. When any writer
+	// is emitted, the shared append/escape helpers (which use strconv) are pulled
+	// in — so "strconv" must be imported.
+	jsonWriterData, jsonEncoderData := h.buildJSONEncodeData(jsonWriters, jsonEncodeRoots)
+	jsonEncodeHelpers := ""
+	if len(jsonWriterData) > 0 {
+		jsonEncodeHelpers = jsonEncodeHelpersSrc
+		hasStrconv := false
+		for _, imp := range stdImports {
+			if strings.Contains(imp, `"strconv"`) {
+				hasStrconv = true
+				break
+			}
+		}
+		if !hasStrconv {
+			stdImports = append(stdImports, `"strconv"`)
+		}
 	}
 	// Inject "time" import when any topic struct uses time.Time and the page
 	// hasn't already imported it from its own source file.
@@ -627,6 +673,11 @@ func (h *WasmHelper) writeWasmMain(src, body string, stdImports []string, helper
 		TopicSnippets: topicSnippets,
 		Body:          indented.String(),
 		Helpers:       helpers,
-		Multiplexed:   multiplexed,
+		Multiplexed:       multiplexed,
+		JSONReaders:       jsonReaderData,
+		JSONDecoders:      jsonDecoderData,
+		JSONWriters:       jsonWriterData,
+		JSONEncoders:      jsonEncoderData,
+		JSONEncodeHelpers: jsonEncodeHelpers,
 	})
 }

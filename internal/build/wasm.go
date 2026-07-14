@@ -68,6 +68,23 @@ type WasmPage struct {
 	// main() registers the ClientSideState body via GothicRegisterScope so one
 	// instance serves every placement of this route's component.
 	Multiplexed bool
+	// JSONDecodeTypes holds the reflection-free JSON reader structs for every
+	// struct type reachable from a Decode[T] call in this page's ClientSideState,
+	// deduplicated by identifier (Phase 6). These are extracted via go/types during
+	// scanning (while the loader's type info is live) and consumed later by
+	// writeWasmMain. Nil when the page makes no Decode[T] call — tree-shaking: no
+	// Decode, no generated decoder, no runtime-parser cost.
+	JSONDecodeTypes []jsonReaderType
+	// JSONDecodeRoots holds the (Ident, GoType) of each top-level Decode[T] type
+	// argument: one _jsonDecode_<Ident> is generated per root, and Decode[T] call
+	// sites are rewritten to it. Nil when the page makes no Decode[T] call.
+	JSONDecodeRoots []jsonRootRef
+	// JSONEncodeTypes / JSONEncodeRoots are the Encode[T] mirror of the two fields
+	// above (Phase 7): the reachable writer structs and the per-root refs for the
+	// _jsonWrite_<Ident> / _jsonEncode_<Ident> functions. Nil when the page makes
+	// no Encode[T] call.
+	JSONEncodeTypes []jsonReaderType
+	JSONEncodeRoots []jsonRootRef
 }
 
 func NewWasmHelper(goos, goarch string) WasmHelper {

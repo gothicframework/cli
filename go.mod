@@ -15,7 +15,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gen2brain/webp v0.6.4
 	github.com/gothicframework/components v1.0.0
-	github.com/gothicframework/core v1.3.0
+	github.com/gothicframework/core v1.4.0
 	github.com/hashicorp/terraform-exec v0.25.2
 	github.com/joho/godotenv v1.5.1
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646

@@ -150,6 +150,32 @@ func (h *WasmHelper) scanFile(path string) (WasmPage, bool, error) {
 		}
 	}
 
+	// Phase 6: detect Decode[T](resp) calls in the ClientSideState body and read
+	// T's struct shape via go/types NOW, while the loader's type info is live —
+	// the *packages.Package is not available later in the build pipeline. A page
+	// with no Decode[T] call yields nil (tree-shaking: no decoder, no parser cost);
+	// a Decode[T] whose T is not a struct is a hard error.
+	var jsonReaders []jsonReaderType
+	var jsonRootRefs []jsonRootRef
+	decodeRoots, derr := collectJSONDecodeRoots(entry.Pkg, res.Body, path)
+	if derr != nil {
+		return WasmPage{}, false, derr
+	}
+	if len(decodeRoots) > 0 {
+		jsonReaders, jsonRootRefs = buildJSONReaderStructs(decodeRoots, entry.Pkg.Types)
+	}
+
+	// Phase 7: Encode[T](v) mirrors Decode — same struct walk, opposite direction.
+	var jsonWriters []jsonReaderType
+	var jsonEncodeRefs []jsonRootRef
+	encodeRoots, eerr := collectJSONEncodeRoots(entry.Pkg, res.Body, path)
+	if eerr != nil {
+		return WasmPage{}, false, eerr
+	}
+	if len(encodeRoots) > 0 {
+		jsonWriters, jsonEncodeRefs = buildJSONReaderStructs(encodeRoots, entry.Pkg.Types)
+	}
+
 	httpPath := h.normalizeWasmHttpPath(path)
 	outputName := h.wasmOutputName(httpPath)
 
@@ -178,6 +204,10 @@ func (h *WasmHelper) scanFile(path string) (WasmPage, bool, error) {
 		LocalPackageDirs: localPackageDirs,
 		UsedDeclSources:  usedDeclSources,
 		Multiplexed:      res.Multiplexed,
+		JSONDecodeTypes:  jsonReaders,
+		JSONDecodeRoots:  jsonRootRefs,
+		JSONEncodeTypes:  jsonWriters,
+		JSONEncodeRoots:  jsonEncodeRefs,
 	}, true, nil
 }
 

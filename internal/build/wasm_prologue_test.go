@@ -81,6 +81,10 @@ func TestWriteWasmMain_GeneratesArtifact(t *testing.T) {
 		nil,                          // topicStructs
 		map[string]string{},          // aliases
 		nil,                          // refAliases
+		nil,                          // jsonReaders
+		nil,                          // jsonRoots
+		nil,                          // jsonWriters
+		nil,                          // jsonEncodeRoots
 		false,                        // multiplexed
 		dest,
 	)

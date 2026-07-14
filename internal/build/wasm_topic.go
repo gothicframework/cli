@@ -217,17 +217,17 @@ func (h *WasmHelper) parseStructsFromSource(src string) (structs []structInfo, t
 				for _, field := range t.Fields.List {
 					typ := h.astTypeString(field.Type)
 					tref, _ := typeRefFromExpr(field.Type)
-					var tag, nameTag string
+					var tag, nameTag, jsonTag string
 					var compression WasmCompression
 					if field.Tag != nil {
-						tag, nameTag, compression = h.parseFieldTag(field.Tag.Value)
+						tag, nameTag, jsonTag, compression = h.parseFieldTag(field.Tag.Value)
 					} else {
 						compression = WasmCompressionGzip
 					}
 					_ = nameTag
 					_ = compression
 					for _, name := range field.Names {
-						si.Fields = append(si.Fields, fieldInfo{Name: name.Name, Type: typ, TypeRef: tref, GothicTag: tag})
+						si.Fields = append(si.Fields, fieldInfo{Name: name.Name, Type: typ, TypeRef: tref, GothicTag: tag, JSONTag: jsonTag})
 					}
 				}
 				// New: CreateTopic(T{}, TopicConfig{...}) — apply metadata if
@@ -269,10 +269,11 @@ func (h *WasmHelper) astTypeString(expr ast.Expr) string {
 // characters and other edge cases that ad-hoc string splitting would miss.
 // tagValue is the raw tag literal as it appears in the AST (including the
 // surrounding backticks).
-func (h *WasmHelper) parseFieldTag(tagValue string) (gothic, name string, compression WasmCompression) {
+func (h *WasmHelper) parseFieldTag(tagValue string) (gothic, name, jsonTag string, compression WasmCompression) {
 	raw := reflect.StructTag(strings.Trim(tagValue, "`"))
 	gothic, _ = raw.Lookup("gothic")
 	name, _ = raw.Lookup("name")
+	jsonTag, _ = raw.Lookup("json")
 	compression = WasmCompressionGzip
 	if c, ok := raw.Lookup("compression"); ok && strings.EqualFold(c, "brotli") {
 		compression = WasmCompressionBrotli

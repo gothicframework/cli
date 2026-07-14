@@ -32,6 +32,44 @@ func _decode_slice{{.Name}}(d *Decoder) []{{.Name}} {
 	return v
 }
 {{end}}
+{{if .JSONReaders}}// ── auto-generated JSON decoders — Decode[T], reflection-free (do not edit) ──
+// _jsonRead_<T> reads a parsed JSON object (map[string]any, produced by the
+// runtime's reflection-free parser via Response.MapAny) into a T; missing keys,
+// JSON null, and type mismatches leave the field at its zero value. No reflect,
+// no encoding/json.{{end}}
+{{range .JSONReaders}}
+func _jsonRead_{{.Ident}}(m map[string]any) {{.GoType}} {
+	var out {{.GoType}}
+{{range .Fields}}	{{.DecLine}}
+{{end}}	return out
+}
+{{end}}{{range .JSONDecoders}}
+func _jsonDecode_{{.Ident}}(r Response) ({{.GoType}}, error) {
+	m, err := r.MapAny()
+	if err != nil {
+		return {{.GoType}}{}, err
+	}
+	return _jsonRead_{{.Ident}}(m), nil
+}
+{{end}}
+{{if .JSONWriters}}// ── auto-generated JSON encoders — Encode[T], reflection-free (do not edit) ──
+// _jsonWrite_<T> appends a JSON object for a T to the shared *[]byte; string
+// escaping + number formatting go through the emitted helpers below (strconv
+// only). No reflect, no encoding/json.{{end}}
+{{.JSONEncodeHelpers}}{{range .JSONWriters}}
+func _jsonWrite_{{.Ident}}(b *[]byte, v {{.GoType}}) {
+	*b = append(*b, '{')
+{{range .Fields}}	*b = append(*b, {{.KeyPrefixLit}}...)
+	{{.ValueLine}}
+{{end}}	*b = append(*b, '}')
+}
+{{end}}{{range .JSONEncoders}}
+func _jsonEncode_{{.Ident}}(v {{.GoType}}) []byte {
+	var b []byte
+	_jsonWrite_{{.Ident}}(&b, v)
+	return b
+}
+{{end}}
 {{range .KeyVars}}var {{.StructName}}Key = BinaryKey("{{.KeyName}}", _encode_{{.StructName}}, _decode_{{.StructName}})
 
 {{end}}
