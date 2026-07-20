@@ -10,8 +10,15 @@ import (
 
 // gothicEmbedFileName is the root `package main` file that bakes ./public into the
 // server binary. It MUST live at the project root (next to the generated main.go),
-// NOT under src/routes: //go:embed cannot reference a parent directory ("..").
-const gothicEmbedFileName = "gothic_embed.go"
+// NOT under src/routes and NOT inside the middleware: //go:embed can only reach
+// files in its own directory subtree (no ".."), and ./public is at the root. The
+// `_gen.go` suffix marks it as generated (like routes_gen.go) and keeps hot-reload
+// from watching it (the exclude filter matches `*_gen.go`).
+const gothicEmbedFileName = "gothic_embed_gen.go"
+
+// legacyEmbedFileName is the pre-rename name; syncEmbeddedPublicFile always removes
+// it so upgrading a project never leaves two //go:embed files fighting over ./public.
+const legacyEmbedFileName = "gothic_embed.go"
 
 // gothicEmbedTemplate is the exact, locked content of the generated embed file.
 // `all:public` embeds dot/underscore files too, matching the disk file server.
@@ -46,6 +53,11 @@ func init() {
 // opting out never leaves ./public baked into (and bloating) the binary. Writing
 // the identical bytes on repeat runs is intentional and idempotent.
 func syncEmbeddedPublicFile(cfg *gothic_cli.Config) error {
+	// Always clear the pre-rename file so an upgraded project can't end up with
+	// both gothic_embed.go and gothic_embed_gen.go embedding ./public.
+	if err := os.Remove(legacyEmbedFileName); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	if cfg == nil || cfg.Runtime.ServeStaticFiles != gothic_config.EMBEDDED {
 		if err := os.Remove(gothicEmbedFileName); err != nil && !os.IsNotExist(err) {
 			return err

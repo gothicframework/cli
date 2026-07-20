@@ -19,7 +19,7 @@ func embeddedConfig(mode gothic_config.StaticFilesMode) *gothic_cli.Config {
 }
 
 // TestSyncEmbeddedPublicFile_WhenEmbedded: an EMBEDDED config generates a valid
-// gothic_embed.go carrying //go:embed all:public and the SetEmbeddedPublicFS init
+// gothic_embed_gen.go carrying //go:embed all:public and the SetEmbeddedPublicFS init
 // call, and the generated file must parse as valid Go.
 func TestSyncEmbeddedPublicFile_WhenEmbedded(t *testing.T) {
 	chdirTemp(t)
@@ -115,5 +115,23 @@ func TestSyncEmbeddedPublicFile_MissingPublicDir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join("public", ".gitkeep")); err != nil {
 		t.Errorf("expected public/.gitkeep to be created: %v", err)
+	}
+}
+
+// TestSyncEmbeddedPublicFile_RemovesLegacyFile covers the rename upgrade path: the
+// pre-rename gothic_embed.go must be deleted on sync (in either mode) so a project
+// never ends up with two //go:embed all:public files fighting over ./public.
+func TestSyncEmbeddedPublicFile_RemovesLegacyFile(t *testing.T) {
+	for _, mode := range []gothic_config.StaticFilesMode{gothic_config.EMBEDDED, gothic_config.CDN} {
+		chdirTemp(t)
+		if err := os.WriteFile(legacyEmbedFileName, []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := syncEmbeddedPublicFile(embeddedConfig(mode)); err != nil {
+			t.Fatalf("mode %v: %v", mode, err)
+		}
+		if _, err := os.Stat(legacyEmbedFileName); !os.IsNotExist(err) {
+			t.Errorf("mode %v: legacy %s should have been removed (err=%v)", mode, legacyEmbedFileName, err)
+		}
 	}
 }
