@@ -65,7 +65,7 @@ func (h *WasmHelper) pageInputHash(page WasmPage) string {
 	if data, err := os.ReadFile(page.SourceFile); err == nil {
 		hh.Write(data)
 	}
-	// Phase 12: per-symbol hashing for the page's own package. Instead of
+	// Per-symbol hashing for the page's own package. Instead of
 	// hashing every hand-written .go file in the page's directory, hash only
 	// the formatted source of the AST decls the page's ClientSideState body
 	// actually references. UsedDeclSources is pre-sorted by the scanner.
@@ -88,7 +88,7 @@ func (h *WasmHelper) pageInputHash(page WasmPage) string {
 	io.WriteString(hh, buildRecipeFingerprint())
 	hh.Write([]byte{byte(page.Compression)})
 	hh.Write([]byte{byte(page.Compiler)})
-	// Phase 14: fold Multiplexed into the hash so toggling it regenerates main()
+	// Fold Multiplexed into the hash so toggling it regenerates main()
 	// even if nothing else in the source changed.
 	if page.Multiplexed {
 		hh.Write([]byte{1})

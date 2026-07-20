@@ -17,7 +17,7 @@ import (
 // that declare a ClientSideState body (either inline or via a named function).
 // Extract that body and the page's std imports for the WASM build pipeline.
 //
-// As of Phase 1 of the AST refactor, extraction is driven by go/packages +
+// Extraction is driven by go/packages +
 // go/ast rather than regular expressions. A single astx.Loader is constructed
 // at the top of ScanPages over the current working directory ("./...") and is
 // reused for every scanned file. The loader is cleared via defer so it does
@@ -150,7 +150,7 @@ func (h *WasmHelper) scanFile(path string) (WasmPage, bool, error) {
 		}
 	}
 
-	// Phase 6: detect Decode[T](resp) calls in the ClientSideState body and read
+	// Detect Decode[T](resp) calls in the ClientSideState body and read
 	// T's struct shape via go/types NOW, while the loader's type info is live —
 	// the *packages.Package is not available later in the build pipeline. A page
 	// with no Decode[T] call yields nil (tree-shaking: no decoder, no parser cost);
@@ -165,7 +165,7 @@ func (h *WasmHelper) scanFile(path string) (WasmPage, bool, error) {
 		jsonReaders, jsonRootRefs = buildJSONReaderStructs(decodeRoots, entry.Pkg.Types)
 	}
 
-	// Phase 7: Encode[T](v) mirrors Decode — same struct walk, opposite direction.
+	// Encode[T](v) mirrors Decode — same struct walk, opposite direction.
 	var jsonWriters []jsonReaderType
 	var jsonEncodeRefs []jsonRootRef
 	encodeRoots, eerr := collectJSONEncodeRoots(entry.Pkg, res.Body, path)

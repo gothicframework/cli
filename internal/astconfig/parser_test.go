@@ -1,12 +1,67 @@
 package astconfig
 
 import (
+	"go/parser"
 	"strings"
 	"testing"
 
 	cli "github.com/gothicframework/cli/v3/internal/cli"
 	config "github.com/gothicframework/core/config"
 )
+
+// runtimeMode parses a single Runtime{...} composite-literal expression and
+// returns the ServeStaticFiles mode parseRuntime resolves. It exercises the same
+// trailing-identifier logic the full Parse uses, without a testdata fixture per case.
+func runtimeMode(t *testing.T, src string) config.StaticFilesMode {
+	t.Helper()
+	expr, err := parser.ParseExpr(src)
+	if err != nil {
+		t.Fatalf("ParseExpr(%q): %v", src, err)
+	}
+	return parseRuntime(expr).ServeStaticFiles
+}
+
+func TestParseRuntimeServeStaticFilesEmbedded(t *testing.T) {
+	if got := runtimeMode(t, `gothic.RuntimeConfig{ServeStaticFiles: gothic.EMBEDDED}`); got != config.EMBEDDED {
+		t.Errorf("ServeStaticFiles = %d, want EMBEDDED (%d)", got, config.EMBEDDED)
+	}
+}
+
+func TestParseRuntimeServeStaticFilesDisk(t *testing.T) {
+	if got := runtimeMode(t, `gothic.RuntimeConfig{ServeStaticFiles: gothic.DISK}`); got != config.DISK {
+		t.Errorf("ServeStaticFiles = %d, want DISK (%d)", got, config.DISK)
+	}
+}
+
+// TestParseRuntimeServeStaticFilesDefaultsCDN checks that a config with
+// NO Runtime block leaves cfg.Runtime.ServeStaticFiles at the zero value /
+// documented default. testdata/basic declares no Runtime block.
+func TestParseRuntimeServeStaticFilesDefaultsCDN(t *testing.T) {
+	cfg, err := Parse("testdata/basic")
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	if cfg.Runtime.ServeStaticFiles != config.CDN {
+		t.Errorf("ServeStaticFiles = %d, want CDN (%d) when no Runtime block is present", cfg.Runtime.ServeStaticFiles, config.CDN)
+	}
+}
+
+// TestParseRuntimeServeStaticFilesUnknownMode ensures an unrecognized identifier
+// falls back to CDN rather than erroring (mirrors parseProvider's
+// permissive fallback for non-provider names).
+func TestParseRuntimeServeStaticFilesUnknownMode(t *testing.T) {
+	if got := runtimeMode(t, `gothic.RuntimeConfig{ServeStaticFiles: gothic.BOGUS_MODE}`); got != config.CDN {
+		t.Errorf("ServeStaticFiles = %d, want CDN (%d) for an unknown mode", got, config.CDN)
+	}
+}
+
+// TestParseRuntimeServeStaticFilesBareIdentifier covers the dot-import form where
+// EMBEDDED appears as a bare Ident (no package qualifier).
+func TestParseRuntimeServeStaticFilesBareIdentifier(t *testing.T) {
+	if got := runtimeMode(t, `RuntimeConfig{ServeStaticFiles: EMBEDDED}`); got != config.EMBEDDED {
+		t.Errorf("ServeStaticFiles = %d, want EMBEDDED (%d) for a bare identifier", got, config.EMBEDDED)
+	}
+}
 
 func strPtr(s string) *string { return &s }
 

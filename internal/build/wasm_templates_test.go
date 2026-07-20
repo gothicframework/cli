@@ -22,7 +22,7 @@ func TestEmbeddedTemplatesReadable(t *testing.T) {
 		t.Errorf("embedded page template missing `func main()`")
 	}
 	// The keep-alive is now haltable: `select { case <-GothicHaltChan(): return }`
-	// (Phase 12 instance teardown) rather than a bare `select {}`.
+	// (instance teardown) rather than a bare `select {}`.
 	if !strings.Contains(string(page), "select {") || !strings.Contains(string(page), "GothicHaltChan()") {
 		t.Errorf("embedded page template missing haltable keep-alive (`select {` + `GothicHaltChan()`)")
 	}

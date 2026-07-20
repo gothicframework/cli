@@ -157,7 +157,7 @@ func _broadcastOnline() {
 	BroadcastTopicOnline("{{.KeyName}}", string(_lastWholeEncoded))
 }
 
-// ── schema seam (Phase 15) ───────────────────────────────────────────────────
+// ── schema seam ──────────────────────────────────────────────────────────────
 // A compact, content-hashed descriptor of this topic's wire shape, reserved for
 // a future generic interpreter. NOTHING interprets it in v3.0 — it is registered
 // opaquely at startup (off the data-plane) via GothicRegisterSchema.

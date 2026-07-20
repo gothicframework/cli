@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// wasm_schema.go implements the Phase 15 SCHEMA SEAM.
+// wasm_schema.go implements the SCHEMA SEAM.
 //
 // From the SAME AST pass that builds the per-field codecs, we derive a compact,
 // canonical descriptor of each topic struct's wire shape — field order, wire

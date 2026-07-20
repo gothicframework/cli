@@ -39,7 +39,7 @@ import (
 	if !strings.Contains(joined, `alias "encoding/json"`) {
 		t.Errorf("aliased std import should be kept with alias, got: %v", got)
 	}
-	// As of Phase 4 (module bridging), non-stdlib imports pass through too:
+	// With module bridging, non-stdlib imports pass through too:
 	// the temp build module links back to the user's project via a replace
 	// directive, so third-party and user-project imports resolve normally.
 	if !strings.Contains(joined, `"github.com/foo/bar"`) {

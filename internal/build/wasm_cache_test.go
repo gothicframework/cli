@@ -185,7 +185,7 @@ func TestFeedHandwrittenPackageFiles_TestFilesExcluded(t *testing.T) {
 
 // TestPageInputHash_LocalPackageDirsModificationInvalidates ensures that
 // modifying a .go file inside a directory listed in page.LocalPackageDirs
-// changes the page hash. This is the Phase 5 cross-package cache fix.
+// changes the page hash. This is the cross-package cache fix.
 func TestPageInputHash_LocalPackageDirsModificationInvalidates(t *testing.T) {
 	dir := withTempCwd(t)
 	srcPath := filepath.Join(dir, "page.go")
@@ -429,7 +429,7 @@ func TestFeedHandwrittenPackageFiles_OrderingDeterministic(t *testing.T) {
 	}
 }
 
-// Phase 12 — Per-symbol cache hashing tests. These exercise the
+// Per-symbol cache hashing tests. These exercise the
 // UsedDeclSources path in pageInputHash directly by constructing WasmPage
 // values with pre-populated decl sources, bypassing the scanner.
 

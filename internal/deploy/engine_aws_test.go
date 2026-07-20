@@ -13,8 +13,8 @@ import (
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	cli "github.com/gothicframework/cli/v3/internal/cli"
-	"github.com/gothicframework/core/config"
 	"github.com/gothicframework/cli/v3/internal/deploy/tfgen"
+	"github.com/gothicframework/core/config"
 )
 
 // --- S3 bootstrap mock ---
@@ -273,6 +273,79 @@ func TestBuildTfGenParamsMapsPointerFields(t *testing.T) {
 	}
 	if p.BucketName != "demo-prod-sfx" || p.Suffix != "sfx" {
 		t.Errorf("computed names not mapped: %+v", p)
+	}
+}
+
+func TestBuildTfGenParams_InjectsGothicProvider(t *testing.T) {
+	e := &TofuAwsEngine{
+		stage: "prod",
+		config: &cli.Config{
+			ProjectName: "demo",
+			Deploy: &cli.DeployConfig{
+				Provider: cli.AWS,
+				Providers: cli.Providers{AWS: cli.AWSProvider{
+					Region:  "us-east-1",
+					Profile: "default",
+					Stages: map[string]cli.EnvVariables{
+						"prod": {
+							ENV: map[string]config.EnvValue{
+								"MY_APP_KEY": {Source: config.RawEnv, Value: "user-value"},
+							},
+						},
+					},
+				}},
+			},
+		},
+	}
+	p := e.buildTfGenParams()
+
+	// GOTHIC_PROVIDER is injected as a raw literal "AWS".
+	got, ok := p.EnvVars["GOTHIC_PROVIDER"]
+	if !ok {
+		t.Fatalf("GOTHIC_PROVIDER not present in EnvVars: %+v", p.EnvVars)
+	}
+	want := config.EnvValue{Source: config.RawEnv, Value: "AWS"}
+	if got != want {
+		t.Errorf("GOTHIC_PROVIDER = %+v, want %+v", got, want)
+	}
+
+	// The pre-existing user key must be preserved untouched.
+	userGot, ok := p.EnvVars["MY_APP_KEY"]
+	if !ok {
+		t.Fatalf("user key MY_APP_KEY was dropped: %+v", p.EnvVars)
+	}
+	if userWant := (config.EnvValue{Source: config.RawEnv, Value: "user-value"}); userGot != userWant {
+		t.Errorf("MY_APP_KEY = %+v, want %+v", userGot, userWant)
+	}
+}
+
+func TestBuildTfGenParams_DoesNotMutateStageENV(t *testing.T) {
+	stageENV := map[string]config.EnvValue{
+		"MY_APP_KEY": {Source: config.RawEnv, Value: "user-value"},
+	}
+	e := &TofuAwsEngine{
+		stage: "prod",
+		config: &cli.Config{
+			ProjectName: "demo",
+			Deploy: &cli.DeployConfig{
+				Provider: cli.AWS,
+				Providers: cli.Providers{AWS: cli.AWSProvider{
+					Region:  "us-east-1",
+					Profile: "default",
+					Stages: map[string]cli.EnvVariables{
+						"prod": {ENV: stageENV},
+					},
+				}},
+			},
+		},
+	}
+	_ = e.buildTfGenParams()
+
+	if _, leaked := stageENV["GOTHIC_PROVIDER"]; leaked {
+		t.Errorf("buildTfGenParams mutated the user's stage ENV map: %+v", stageENV)
+	}
+	if len(stageENV) != 1 {
+		t.Errorf("stage ENV map size changed: got %d entries, want 1: %+v", len(stageENV), stageENV)
 	}
 }
 

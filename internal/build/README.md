@@ -129,14 +129,14 @@ Per-instance TinyGo components stay the norm — they must be small and are rebu
 
 ## Topic-manager consolidation into the core
 
-In v2, every topic declared in `src/topics/` produced a **dedicated manager WASM binary**, mounted once per page. In v3 (Phase 17) the static core **replaces all of them** as the single generic **OPAQUE** topic hub:
+In v2, every topic declared in `src/topics/` produced a **dedicated manager WASM binary**, mounted once per page. In v3 the static core **replaces all of them** as the single generic **OPAQUE** topic hub:
 
 - Each topic *consumer* self-registers its key + field names with the core at runtime (`RegisterTopicWithCore`, emitted into the generated page `main`). That registration is what makes the core subscribe to the key's per-field write events and replay stored state on join.
 - The core is a **store-and-forward** hub keyed per `(key, field)`: it stores each incoming per-field frame verbatim, **byte-diffs** against the prior value, re-broadcasts only on change, and replays each stored field to a newly-registering consumer, followed by a per-key **online ack**. It never interprets a frame — the payload is opaque bytes.
 
 **The user-facing topic API is UNCHANGED**: `CreateTopic`, `PageTopic()` / your `SubscriberFnName` accessor, per-field `topic.Field.Set/Get/Peek`, and whole-struct `topic.Set(...)` all behave exactly as documented in the Topics section below.
 
-### v3 topics have NO mount — the convention (BREAKING, Phase 25b)
+### v3 topics have NO mount — the convention (BREAKING)
 
 **There is no topic mount in v3.** The whole API is: declare a `CreateTopic(...)` in `src/topics/` (a required folder) and use the topic's generated accessor inside `ClientSideState`. That's it — using the accessor auto-registers the topic with the always-loaded core, which does all the store/forward/replay work. You do **not** mount anything.
 
@@ -158,7 +158,7 @@ topic := GetCounterTopic()
 - **`TopicConfig.ComponentFnName` is removed.** Setting it is a compile error. Keep `SubscriberFnName` — it names the accessor, which is the only knob that still matters.
 - The internal `routes.TopicManagerComponent(...)` helper is gone.
 
-Prior versions deprecated the mount to a no-op (Phase 17→25); Phase 25b removes it outright. **`migrate-v3` auto-strips both** for you: it deletes every `ComponentFnName:` line from your `src/topics/*.go` `TopicConfig` literals and removes every `@AddXxxTopic()` / `@wasm.AddXxxTopic()` mount call from your `.templ` files, so a migrated project builds against the field-less v3 `TopicConfig`.
+Prior versions deprecated the mount to a no-op; v3 removes it outright. **`migrate-v3` auto-strips both** for you: it deletes every `ComponentFnName:` line from your `src/topics/*.go` `TopicConfig` literals and removes every `@AddXxxTopic()` / `@wasm.AddXxxTopic()` mount call from your `.templ` files, so a migrated project builds against the field-less v3 `TopicConfig`.
 
 ## Two-tier protocol
 
@@ -864,7 +864,7 @@ The short version of everything below:
 
 1. **Declare** a topic with `CreateTopic(T{}, TopicConfig{...})` in a file under `src/topics/`. This folder is **required** — the CLI scans `src/topics/` for topic definitions; a topic declared anywhere else is not seen. The CLI normalizes your `var X = CreateTopic(...)` to `var _ = CreateTopic(...)` on disk and generates the accessor into `src/topics/topic_gen.go`.
 2. **Use the generated accessor** (`SubscriberFnName`, e.g. `PageTopic()`) inside `ClientSideState` in every component that shares the state. Using the accessor is what auto-registers the topic with the always-loaded core (see the [Instance Model](#the-v30-instance-model) / topic-consolidation section) — registration, per-field broadcast, and replay all flow from the accessor.
-3. **There is no mount.** v3 has **no** `@AddXxxTopic()` mount and **no** `TopicConfig.ComponentFnName` field — both were removed (Phase 25b, breaking). The always-loaded core handles every topic; using the accessor in step 2 is the entire wiring. `gothic migrate-v3` auto-strips any leftover `ComponentFnName:` line and `@AddXxxTopic()` call from a migrated v2 project.
+3. **There is no mount.** v3 has **no** `@AddXxxTopic()` mount and **no** `TopicConfig.ComponentFnName` field — both were removed (breaking). The always-loaded core handles every topic; using the accessor in step 2 is the entire wiring. `gothic migrate-v3` auto-strips any leftover `ComponentFnName:` line and `@AddXxxTopic()` call from a migrated v2 project.
 
 ### Defining a topic
 
@@ -1685,7 +1685,7 @@ are load-bearing for stress workloads. This section documents the shipped behavi
 
 ### The topic hub is the sole writer
 
-> **Historical note:** this subsection describes the *pre-Phase-17* model where
+> **Historical note:** this subsection describes the *pre-consolidation* model where
 > each topic had its own **manager WASM** mounted per page. In v3 the always-loaded
 > **static core** plays this exact role for every topic (there is no per-topic
 > manager binary and no mount — see "Topic-manager consolidation into the core"

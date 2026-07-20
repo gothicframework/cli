@@ -36,7 +36,17 @@ type Config struct {
 		LowResolutionRate int `json:"lowResolutionRate"`
 		Quality           int `json:"quality"`
 	} `json:"optimizeImages"`
-	Deploy *DeployConfig `json:"deploy"`
+	Runtime RuntimeConfig `json:"runtime"`
+	Deploy  *DeployConfig `json:"deploy"`
+}
+
+// RuntimeConfig mirrors the subset of config.RuntimeConfig the CLI needs to make
+// build-time decisions. Today that is only ServeStaticFiles: it drives whether a
+// root gothic_embed.go is generated to bake ./public into the server binary
+// (config.EMBEDDED) — the zero value is config.CDN, matching the
+// documented default when a project omits the Runtime block.
+type RuntimeConfig struct {
+	ServeStaticFiles config.StaticFilesMode `json:"serveStaticFiles"`
 }
 
 // Provider mirrors config.Provider: the internal enum the AST parser produces to

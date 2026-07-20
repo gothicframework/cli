@@ -293,6 +293,10 @@ func (command *HotReloadCommand) rebuild() {
 		fmt.Printf("error building routes: %v", err)
 		return
 	}
+	if err := syncEmbeddedPublicFile(&config); err != nil {
+		fmt.Printf("error syncing embedded public file: %v", err)
+		return
+	}
 
 	log.Println("Build templ...")
 	if err := command.cli.Templ.Render(); err != nil {

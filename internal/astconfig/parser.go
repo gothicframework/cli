@@ -94,6 +94,8 @@ func Parse(projectRoot string) (*cli.Config, error) {
 					}
 				}
 			}
+		case "Runtime":
+			cfg.Runtime = parseRuntime(kv.Value)
 		case "Deploy":
 			dc, err := parseDeploy(fset, kv.Value)
 			if err != nil {
@@ -149,6 +151,39 @@ func parseDeploy(fset *token.FileSet, v ast.Expr) (*cli.DeployConfig, error) {
 		}
 	}
 	return dc, nil
+}
+
+// parseRuntime reads a Runtime{...} block and extracts the CLI-relevant subset
+// (currently only ServeStaticFiles). Like parseProvider, there is no type checker,
+// so it keys off the TRAILING identifier name of the ServeStaticFiles value —
+// handling gothic.EMBEDDED / config.DISK (SelectorExpr) and a bare EMBEDDED
+// (Ident, under a dot-import) alike. An omitted field, an unreadable/dynamic
+// value, or an unknown mode falls back to config.CDN — the zero value
+// and documented default — mirroring parseProvider's permissive fallback.
+func parseRuntime(v ast.Expr) cli.RuntimeConfig {
+	rc := cli.RuntimeConfig{ServeStaticFiles: config.CDN}
+	lit, ok := compositeLit(v)
+	if !ok {
+		return rc
+	}
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		if identName(kv.Key) != "ServeStaticFiles" {
+			continue
+		}
+		switch providerIdentName(kv.Value) {
+		case "DISK", "ALL_ENVS": // ALL_ENVS: legacy name for DISK (pre-cloud-agnostic rename).
+			rc.ServeStaticFiles = config.DISK
+		case "EMBEDDED":
+			rc.ServeStaticFiles = config.EMBEDDED
+		default: // "CDN"/"HOT_RELOAD_ONLY" (legacy), an unknown name, or a non-identifier value.
+			rc.ServeStaticFiles = config.CDN
+		}
+	}
+	return rc
 }
 
 // parseProvider maps a Provider selector (e.g. gothic.AWS) or bare identifier

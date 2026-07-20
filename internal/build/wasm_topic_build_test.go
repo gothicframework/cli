@@ -11,7 +11,7 @@ import (
 	wasmruntime "github.com/gothicframework/core/wasm"
 )
 
-// TestPhase17ConsumerBuildsUnderJSWasm is the Phase-17 Go-level build gate: it
+// TestTopicConsumerBuildsUnderJSWasm is the topic-consumer Go-level build gate: it
 // renders a REAL topic consumer page main (per-field-fanout Set + per-field-replay
 // online + RegisterTopicWithCore control-plane handshake) into a wasm-runtime
 // module and compiles it with the standard Go js/wasm toolchain. The runtime
@@ -21,12 +21,12 @@ import (
 // ListenTopicCoreOnline, _broadcastAll) link and type-check for the WASM target.
 //
 // The end-to-end BEHAVIOR (writer → core → consumer, per-field, online/ping
-// hydration, large-payload stress) is proven by the Phase-21
+// hydration, large-payload stress) is proven by the
 // wasm-topic-consolidation.spec.ts Playwright suite on TestGothic — NOT here.
 //
 // Skipped when the Go toolchain is unavailable (matches the rest of the suite,
 // which runs in toolchain-less CI).
-func TestPhase17ConsumerBuildsUnderJSWasm(t *testing.T) {
+func TestTopicConsumerBuildsUnderJSWasm(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not on PATH; skipping js/wasm build gate")
 	}
@@ -81,7 +81,7 @@ func TestPhase17ConsumerBuildsUnderJSWasm(t *testing.T) {
 	}
 }
 
-// TestTopicAccessorNoMountBuildsUnderJSWasm is the Phase-25 guarantee test: it
+// TestTopicAccessorNoMountBuildsUnderJSWasm is the no-mount guarantee test: it
 // pins the fact that a topic's mount (@AddXxxTopic() / TopicManagerComponent) is
 // NOT required for a topic to register with the core. It renders a page whose
 // ClientSideState uses ONLY the topic accessor (`PageTopic()`) — there is no
@@ -90,7 +90,7 @@ func TestPhase17ConsumerBuildsUnderJSWasm(t *testing.T) {
 // (RegisterTopicWithCore) plus the per-field wiring and codec, and finally builds
 // the whole thing under GOOS=js GOARCH=wasm.
 //
-// This is the codegen-level proof behind Phase 25's "the mount is optional /
+// This is the codegen-level proof behind the "the mount is optional /
 // deprecated" claim: declaring a topic and using its accessor is sufficient to
 // auto-register with the core. If a future refactor ever made registration depend
 // on the mount, this test fails.

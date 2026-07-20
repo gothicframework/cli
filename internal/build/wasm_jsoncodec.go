@@ -1,6 +1,6 @@
 package helpers
 
-// Reflection-free JSON decode-line generation for the Decode[T] path (Phase 6).
+// Reflection-free JSON decode-line generation for the Decode[T] path.
 //
 // Model mirrors the binary codec (wasm_codec.go): jsonDecodeLines dispatches per
 // field and buildJSONDecodeData folds the results into template data — but the

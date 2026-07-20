@@ -175,9 +175,16 @@ func (e *TofuAwsEngine) buildTfGenParams() tfgen.TfGenParams {
 		// every *.tf / *.tf.json inside it is merged into the same OpenTofu stack.
 		InfraDir: "infra",
 	}
-	if stageCfg.ENV != nil {
-		params.EnvVars = stageCfg.ENV
+	// Copy the user's stage ENV into a fresh map — never mutate stageCfg.ENV in
+	// place, or the injected GOTHIC_PROVIDER key would leak back into the user's
+	// config map.
+	for k, v := range stageCfg.ENV {
+		params.EnvVars[k] = v
 	}
+	// GOTHIC_PROVIDER is the single AWS signal the runtime keys off to detect it
+	// is running on AWS Lambda (mirrors the GOTHIC_MODE pattern). writeEnvResolved
+	// in the generator turns every params.EnvVars entry into a Lambda env var.
+	params.EnvVars["GOTHIC_PROVIDER"] = config.EnvValue{Source: config.RawEnv, Value: "AWS"}
 	// Source-aware domain fields are copied through as-is (nil stays nil); the
 	// generator resolves each into a local via raw value / SSM / Secrets Manager.
 	params.WafArn = stageCfg.WafArn

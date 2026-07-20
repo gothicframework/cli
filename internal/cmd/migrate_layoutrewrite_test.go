@@ -57,14 +57,13 @@ func TestRewriteRealV2Layout(t *testing.T) {
 		"@gothicComponents.RuntimeScripts()",
 		`import gothicComponents "github.com/gothicframework/components"`,
 		`href="/public/favicon.ico"`,          // preserved
-		`hx-ext="amz-content-sha256"`,         // body attribute preserved
 		`<title>GOTHIC APP</title>`,           // preserved
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q\n---\n%s", want, s)
 		}
 	}
-	for _, bad := range []string{`<link rel="stylesheet"`, "unpkg.com/htmx", "hx-ext-amz-content-sha256@", "gothic-core"} {
+	for _, bad := range []string{`<link rel="stylesheet"`, "unpkg.com/htmx", "hx-ext-amz-content-sha256@", "gothic-core", "amz-content-sha256"} {
 		if strings.Contains(s, bad) {
 			t.Errorf("should not still contain %q\n---\n%s", bad, s)
 		}
@@ -73,6 +72,91 @@ func TestRewriteRealV2Layout(t *testing.T) {
 	if strings.Index(s, "@gothicComponents.Styles()") > strings.Index(s, "@gothicComponents.RuntimeScripts()") {
 		t.Errorf("Styles() should be emitted before RuntimeScripts()\n---\n%s", s)
 	}
+}
+
+// TestRewriteLayoutTemplV3_StripsBodyAmzHxExt proves the migration removes the
+// obsolete manual amz-content-sha256 opt-in from the <body> hx-ext, in both the
+// "alone" form (whole attribute dropped) and the "combined" form (only the amz
+// token dropped, other extensions and attributes preserved).
+func TestRewriteLayoutTemplV3_StripsBodyAmzHxExt(t *testing.T) {
+	const head = `package layouts
+
+templ PageLayout() {
+	<head>
+		<link rel="stylesheet" href="/public/styles.css"/>
+		<script src="https://unpkg.com/htmx.org@2.0.3" crossorigin="anonymous"></script>
+		<script defer src="https://unpkg.com/hx-ext-amz-content-sha256@1.0.12/min.js"></script>
+	</head>
+`
+
+	t.Run("alone -> attribute removed, hx-boost kept", func(t *testing.T) {
+		src := head + `	<body class="bg-black" hx-ext="amz-content-sha256" hx-boost="true">
+		{ children... }
+	</body>
+}
+`
+		p := writeTempl(t, src)
+		ok, err := rewriteLayoutTemplV3(p)
+		if err != nil || !ok {
+			t.Fatalf("expected rewrite (ok=%v err=%v)", ok, err)
+		}
+		s := readTemplFile(t, p)
+		if strings.Contains(s, "amz-content-sha256") {
+			t.Errorf("amz-content-sha256 should be gone\n---\n%s", s)
+		}
+		if strings.Contains(s, "hx-ext") {
+			t.Errorf("hx-ext attribute should be removed entirely when amz was its only token\n---\n%s", s)
+		}
+		if !strings.Contains(s, `hx-boost="true"`) {
+			t.Errorf("hx-boost must be preserved\n---\n%s", s)
+		}
+		if !strings.Contains(s, `class="bg-black"`) {
+			t.Errorf("class must be preserved\n---\n%s", s)
+		}
+	})
+
+	t.Run("combined -> only amz token removed, preload + hx-boost kept", func(t *testing.T) {
+		src := head + `	<body class="bg-black" hx-ext="preload,amz-content-sha256" hx-boost="true">
+		{ children... }
+	</body>
+}
+`
+		p := writeTempl(t, src)
+		ok, err := rewriteLayoutTemplV3(p)
+		if err != nil || !ok {
+			t.Fatalf("expected rewrite (ok=%v err=%v)", ok, err)
+		}
+		s := readTemplFile(t, p)
+		if strings.Contains(s, "amz-content-sha256") {
+			t.Errorf("amz-content-sha256 token should be gone\n---\n%s", s)
+		}
+		if !strings.Contains(s, `hx-ext="preload"`) {
+			t.Errorf("remaining hx-ext should be well-formed (preload only)\n---\n%s", s)
+		}
+		if !strings.Contains(s, `hx-boost="true"`) {
+			t.Errorf("hx-boost must be preserved\n---\n%s", s)
+		}
+	})
+
+	t.Run("amz-first combined -> preload survives", func(t *testing.T) {
+		src := head + `	<body hx-ext="amz-content-sha256,preload">
+		{ children... }
+	</body>
+}
+`
+		p := writeTempl(t, src)
+		ok, err := rewriteLayoutTemplV3(p)
+		if err != nil || !ok {
+			t.Fatalf("expected rewrite (ok=%v err=%v)", ok, err)
+		}
+		s := readTemplFile(t, p)
+		if strings.Contains(s, "amz-content-sha256") {
+			t.Errorf("amz-content-sha256 token should be gone\n---\n%s", s)
+		}
+		if !strings.Contains(s, `hx-ext="preload"`) {
+			t.Errorf("remaining hx-ext should be well-formed (preload only)\n---\n%s", s)
+		}
+	})
 }
 
 func TestRewriteLayoutIsIdempotent(t *testing.T) {

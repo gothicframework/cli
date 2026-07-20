@@ -50,7 +50,7 @@ func TestPageMainMultiplexedWrapper(t *testing.T) {
 
 // TestPageMainNonMultiplexedByteLayout is a regression guard for the
 // byte-identical invariant: the non-multiplexed main() body must sit directly
-// between `func main() {` and the haltable keep-alive, exactly as before Phase 14.
+// between `func main() {` and the haltable keep-alive, exactly as before multiplexing.
 func TestPageMainNonMultiplexedByteLayout(t *testing.T) {
 	body := "\tcount := CreateObservable(0)\n\t_ = count\n"
 	non := renderPageMain(t, false)

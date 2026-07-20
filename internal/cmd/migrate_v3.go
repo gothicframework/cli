@@ -110,6 +110,11 @@ func rewriteV2ToV3File(path string) (bool, error) {
 	updated := v2ToV3ImportPattern.ReplaceAllFunc(original, func(m []byte) []byte {
 		return []byte(mapFrameworkImport(string(m)))
 	})
+	// Also rename the renamed StaticFilesMode constants (HOT_RELOAD_ONLY→CDN,
+	// ALL_ENVS→DISK) anywhere a package-qualified reference appears — a safety net
+	// for projects that read the mode outside the Setup/AppConfig literal that
+	// toRuntimeLiteral already handles.
+	updated = []byte(renameStaticFilesModeConsts(string(updated)))
 	if bytes.Equal(original, updated) {
 		return false, nil
 	}

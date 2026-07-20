@@ -16,7 +16,7 @@ func schemaStructNames(structs []structInfo) map[string]bool {
 	return m
 }
 
-// TestSchemaFingerprintStable verifies the Phase 15 schema seam: the schemaId is
+// TestSchemaFingerprintStable verifies the schema seam: the schemaId is
 // STABLE for an unchanged type and CHANGES when the type's fields/tags change.
 func TestSchemaFingerprintStable(t *testing.T) {
 	h := DefaultWasmHelper()

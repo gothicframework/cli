@@ -115,11 +115,20 @@ func (command *DeployCommand) Deploy(stage string, action string) error {
 	// so they matter only for a deploy — a teardown needs none of them. Build them
 	// first (and only here) so a local build failure aborts before we touch AWS.
 	if action == "deploy" {
+		// Deploying EMBEDDED to AWS bakes ./public into the Lambda even though
+		// CloudFront/S3 serve /public/*. Warn (don't block) — the file is still
+		// generated below so the build stays consistent with the config.
+		if w := embeddedOnAWSWarning(&config); w != "" {
+			fmt.Println(paint(clrYellow, "⚠ "+w))
+		}
 		deployPhase("Building front-end assets (Templ · Tailwind · WASM)")
 		if err := command.cli.Templ.Render(); err != nil {
 			return err
 		}
 		if err := command.cli.FileBasedRouter.Render(config.GoModName); err != nil {
+			return err
+		}
+		if err := syncEmbeddedPublicFile(&config); err != nil {
 			return err
 		}
 		if err := command.cli.Tailwind.Build(); err != nil {

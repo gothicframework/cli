@@ -102,7 +102,7 @@ var Config = gothic.Config{
 	Runtime: gothic.RuntimeConfig{
 		CacheStrategy:         gothic.CACHE_CONTROL_HEADERS,
 		LocalDevelopmentCache: gothic.IN_MEMORY,
-		ServeStaticFiles:      gothic.HOT_RELOAD_ONLY,
+		ServeStaticFiles:      gothic.CDN,
 	},
 
 	Deploy: &gothic.DeployConfig{

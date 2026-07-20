@@ -20,14 +20,15 @@ var Config = gothic.Config{
 	//     CACHE_CONTROL_HEADERS (default) | IN_MEMORY | REDIS | LOCAL_FILES
 	//   LocalDevelopmentCache: cache backend used during hot reload.
 	//     IN_MEMORY (default) | REDIS | LOCAL_FILES
-	//   ServeStaticFiles: when /public/* is served from disk.
-	//     HOT_RELOAD_ONLY (default): only in dev; in prod CloudFront serves from S3.
-	//     ALL_ENVS: always from disk (the public folder must ship with the binary).
+	//   ServeStaticFiles: where /public/* is served from.
+	//     CDN (default): your CDN/object store serves it in prod; disk only in dev.
+	//     DISK: the app serves it from ./public in every env (ship public/ with the binary).
+	//     EMBEDDED: baked into the binary via go:embed (single self-contained binary).
 	//   CacheConfig: optional backend settings (Redis URL, compression, ...).
 	Runtime: gothic.RuntimeConfig{
 		CacheStrategy:         gothic.CACHE_CONTROL_HEADERS,
 		LocalDevelopmentCache: gothic.IN_MEMORY,
-		ServeStaticFiles:      gothic.HOT_RELOAD_ONLY,
+		ServeStaticFiles:      gothic.CDN,
 	},
 	Deploy: &gothic.DeployConfig{
 		// Provider selects the cloud to deploy to. v3 ships AWS only.

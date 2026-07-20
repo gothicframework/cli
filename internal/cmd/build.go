@@ -45,6 +45,10 @@ func (command *BuildCommand) Build() error {
 		return err
 	}
 
+	if err := syncEmbeddedPublicFile(&config); err != nil {
+		return err
+	}
+
 	return nil
 }
 

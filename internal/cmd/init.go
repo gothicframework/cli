@@ -131,6 +131,17 @@ func (command *InitCommand) CreateNewGothicApp(data cli_data.GothicCliData, modu
 		return err
 	}
 
+	// Keep gothic_embed.go in sync with the scaffolded static-files mode. A fresh
+	// project defaults to CDN, so this normally just ensures no stale
+	// embed file lingers; it becomes load-bearing only if the config opts into
+	// EMBEDDED. GetConfig here only AST-parses gothic.config.go (+ reads go.mod),
+	// so it is safe to call before TidyModule populates go.sum.
+	if cfg, err := command.cli.GetConfig(); err != nil {
+		return err
+	} else if err := syncEmbeddedPublicFile(&cfg); err != nil {
+		return err
+	}
+
 	// Now that all sub-packages have their generated .go files (templ + routes),
 	// resolve dependencies and populate go.sum. This must run AFTER codegen — a
 	// tidy during InitializeModule would fail on the not-yet-generated packages
@@ -250,8 +261,8 @@ func (command *InitCommand) createInitialFileStructure() error {
 		})
 	}
 
-	// The shared gothic-core.js runtime (Phase 15) and the prebuilt full-Go static
-	// core (Phase 16) are NO LONGER seeded into public/. They are served straight
+	// The shared gothic-core.js runtime and the prebuilt full-Go static
+	// core are NO LONGER seeded into public/. They are served straight
 	// from the framework embed via the /_gothic/ route (see pkg/helpers/runtimeassets
 	// and pkg/server), so the layout's <head> references resolve without any files
 	// being copied into the project tree.

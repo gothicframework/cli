@@ -3,17 +3,25 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 // rewriteLayoutTemplV3 rewrites a .templ layout in place to the v3 runtime-asset
 // components. A v2 Gothic layout loads htmx from unpkg in its <head>; that <script>
 // is the anchor we swap for @gothicComponents.RuntimeScripts() (which now bundles
-// gothic-core, gothic-core-boot, htmx and the hx-ext extension). The
-// /public/styles.css <link> becomes @gothicComponents.Styles(), and the now-bundled
-// hx-ext <script> — plus any gothic-core* <script> from a partially-migrated project
-// — are dropped. Everything else (favicon links, the body's hx-ext attribute, the
-// file's own markup) is left intact, and the components import is added when missing.
+// gothic-core, gothic-core-boot and htmx). The /public/styles.css <link> becomes
+// @gothicComponents.Styles(), and any leftover hx-ext-amz-content-sha256 <script> —
+// plus any gothic-core* <script> from a partially-migrated project — are dropped.
+//
+// In v3 AWS request-signing is performed automatically by the Gothic core WASM
+// runtime (activated when GOTHIC_PROVIDER=AWS), so the old manual opt-in is obsolete:
+// the body's hx-ext="amz-content-sha256" attribute is STRIPPED. When hx-ext carries
+// only that token the whole attribute is removed; when it is combined with other
+// extensions (e.g. hx-ext="preload,amz-content-sha256") only the amz token is removed
+// and the remaining value is left well-formed (hx-ext="preload"). Every other
+// attribute (hx-boost, class, …), the favicon links and the file's own markup are
+// left intact, and the components import is added when missing.
 //
 // Returns false (file untouched) when the file is not a Gothic layout (no unpkg htmx
 // reference) or has already been migrated (RuntimeScripts already present), which
@@ -48,8 +56,39 @@ func rewriteLayoutTemplV3(path string) (bool, error) {
 			out = append(out, ln)
 		}
 	}
-	result := ensureLayoutComponentsImport(strings.Join(out, "\n"))
+	joined := stripAmzHxExt(strings.Join(out, "\n"))
+	result := ensureLayoutComponentsImport(joined)
 	return true, os.WriteFile(path, []byte(result), 0o644)
+}
+
+// amzHxExtRe matches a double-quoted hx-ext attribute plus any whitespace preceding
+// it, so that dropping the whole attribute does not leave a dangling space between
+// the previous attribute and the next one. templ layouts always double-quote
+// attribute values (Go's RE2 has no backreferences, so a single pattern for both
+// quote styles is not possible — double quotes are what v2 layouts ship).
+var amzHxExtRe = regexp.MustCompile(`\s*hx-ext\s*=\s*"([^"]*)"`)
+
+// stripAmzHxExt removes the "amz-content-sha256" token from every hx-ext attribute:
+//   - hx-ext="amz-content-sha256"            → attribute removed entirely
+//   - hx-ext="preload,amz-content-sha256"    → hx-ext="preload"
+//   - hx-ext="amz-content-sha256,preload"    → hx-ext="preload"
+//
+// An hx-ext with no amz token is rewritten to an equivalent value (tokens trimmed),
+// so it is effectively left intact. Other attributes are untouched.
+func stripAmzHxExt(s string) string {
+	return amzHxExtRe.ReplaceAllStringFunc(s, func(m string) string {
+		value := amzHxExtRe.FindStringSubmatch(m)[1]
+		kept := make([]string, 0, 4)
+		for _, tok := range strings.Split(value, ",") {
+			if t := strings.TrimSpace(tok); t != "" && t != "amz-content-sha256" {
+				kept = append(kept, t)
+			}
+		}
+		if len(kept) == 0 {
+			return "" // only amz (or empty) — drop the whole attribute + its leading space
+		}
+		return ` hx-ext="` + strings.Join(kept, ",") + `"`
+	})
 }
 
 // ensureLayoutComponentsImport adds the gothicComponents import to a .templ file

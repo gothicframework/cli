@@ -13,7 +13,7 @@ import (
 
 // writeSharedDTOFixture stands up the shared-DTO pattern: a `shared` package with
 // a root struct EchoStruct that has a NESTED struct field of type shared.EchoNested
-// (same package as the root). Mirrors the Phase 8 e2e own-BFF-JSON case.
+// (same package as the root). Mirrors the e2e own-BFF-JSON case.
 func writeSharedDTOFixture(t *testing.T) {
 	t.Helper()
 	writeDecodeFixtureCommon(t)
@@ -33,8 +33,8 @@ type EchoStruct struct {
 `)
 }
 
-// TestNestedScan_CrossPackageNestedStruct is the regression test for the Phase 8
-// bug: a cross-package root shared.EchoStruct with a nested struct field of type
+// TestNestedScan_CrossPackageNestedStruct is the regression test for the
+// cross-package nested-struct bug: a cross-package root shared.EchoStruct with a nested struct field of type
 // shared.EchoNested (same package) must recurse — the generated reader/writer for
 // the nested type must be emitted (qualified) and called, not soft-failed to zero.
 func TestNestedScan_CrossPackageNestedStruct(t *testing.T) {
@@ -200,7 +200,7 @@ func main() {
 		t.Fatalf("generated JSON does not unmarshal: %v\nJSON: %s", err, out)
 	}
 	if got.Nested.Depth != 7 || got.Nested.Tag != "root" {
-		t.Errorf("nested field round-trip failed (the Phase 8 bug): got %+v, want {Depth:7 Tag:root}", got.Nested)
+		t.Errorf("nested field round-trip failed (the cross-package nested-struct bug): got %+v, want {Depth:7 Tag:root}", got.Nested)
 	}
 	if len(got.Kids) != 2 || got.Kids[0].Depth != 1 || got.Kids[1].Tag != "b" {
 		t.Errorf("slice-of-nested round-trip failed: %+v", got.Kids)

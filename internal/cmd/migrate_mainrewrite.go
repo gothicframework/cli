@@ -273,7 +273,22 @@ func findChiRouter(fn *ast.FuncDecl, fset *token.FileSet) (string, int) {
 func toRuntimeLiteral(fset *token.FileSet, src []byte, appCfg *ast.CompositeLit, routesAlias string) string {
 	lit := nodeText(fset, src, appCfg)
 	lit = strings.ReplaceAll(lit, routesAlias+".", "gothic.")
-	return strings.Replace(lit, "gothic.AppConfig", "gothic.RuntimeConfig", 1)
+	lit = strings.Replace(lit, "gothic.AppConfig", "gothic.RuntimeConfig", 1)
+	return renameStaticFilesModeConsts(lit)
+}
+
+// renameStaticFilesModeConsts rewrites the pre-cloud-agnostic StaticFilesMode
+// constant names to their current identifiers. The enum ordinals are unchanged —
+// only the names were renamed: HOT_RELOAD_ONLY → CDN, ALL_ENVS → DISK. Matching is
+// scoped to a package-qualified reference (a leading '.') so it only touches
+// `gothic.HOT_RELOAD_ONLY` / `helpers.ALL_ENVS` / `config.ALL_ENVS`, never an
+// unrelated user identifier that happens to share the name. Without this, a v2/older
+// project's `ServeStaticFiles: gothic.ALL_ENVS` would migrate to a name that no
+// longer exists and fail to compile.
+func renameStaticFilesModeConsts(s string) string {
+	s = strings.ReplaceAll(s, ".HOT_RELOAD_ONLY", ".CDN")
+	s = strings.ReplaceAll(s, ".ALL_ENVS", ".DISK")
+	return s
 }
 
 // injectRuntimeConfig replaces the value of the Runtime field in gothic.config.go

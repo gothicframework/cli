@@ -43,7 +43,7 @@ func _decode_slice{{.Name}}(d *Decoder) []{{.Name}} {
 }
 
 {{end}}
-{{range .ServerFuncs}}// Schema seam (Phase 15): a compact, content-hashed descriptor of {{.StructName}}'s
+{{range .ServerFuncs}}// Schema seam: a compact, content-hashed descriptor of {{.StructName}}'s
 // wire shape, reserved for a future generic interpreter. Interpreted by nothing
 // in v3.0; emitted here so the server build carries the same reserved descriptor.
 const _gothicSchemaID_{{.StructName}} = "{{.SchemaID}}"

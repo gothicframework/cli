@@ -1,6 +1,6 @@
 package helpers
 
-// Reflection-free JSON encode-line generation for the Encode[T] path (Phase 7),
+// Reflection-free JSON encode-line generation for the Encode[T] path,
 // the write-direction mirror of wasm_jsoncodec.go.
 //
 // jsonEncodeLines (via buildJSONEncodeData) emits, per struct field, a JSON
@@ -10,7 +10,7 @@ package helpers
 // (jsonEncodeHelpersSrc) backed by strconv (TinyGo-safe), and string escaping is
 // done by the emitted _jsonAppendString.
 //
-// Serialization decisions (documented for Phase 11):
+// Serialization decisions:
 //   - Field order is the Go struct field order — deterministic, so output is
 //     stable and testable.
 //   - json tags: name rename honored; `json:"-"` skips; `,omitempty` (and every

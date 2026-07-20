@@ -55,7 +55,7 @@ func PageLayout() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</head><body class=\"antialiased flex flex-col justify-center items-center w-screen h-screen bg-black p-3\" hx-ext=\"amz-content-sha256\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</head><body class=\"antialiased flex flex-col justify-center items-center w-screen h-screen bg-black p-3\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

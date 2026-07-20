@@ -61,7 +61,7 @@ type WasmTopicFuncData struct {
 	KeyName     string
 	Fields      []TopicFieldData
 	FieldCodecs []PerFieldCodec // one entry per source struct field, in declaration order
-	// Schema seam (Phase 15): content-hash id + Go-quoted descriptor literal of
+	// Schema seam: content-hash id + Go-quoted descriptor literal of
 	// this topic's wire shape. Threaded into the consumer's registration via
 	// GothicRegisterSchema; interpreted by nothing in v3.0.
 	SchemaID            string
@@ -74,7 +74,7 @@ type ServerTopicFuncData struct {
 	TypeName   string
 	StructName string
 	Fields     []TopicFieldData
-	// Schema seam (Phase 15): content-hash id + Go-quoted descriptor literal,
+	// Schema seam: content-hash id + Go-quoted descriptor literal,
 	// emitted as a package-level const so the server build carries the same
 	// reserved wire descriptor. Interpreted by nothing in v3.0.
 	SchemaID            string
@@ -108,14 +108,14 @@ type WasmPageMainData struct {
 	// component. When false the generated main() is byte-identical to before.
 	Multiplexed bool
 	// JSONReaders / JSONDecoders drive the reflection-free Decode[T] codegen
-	// (Phase 6): one _jsonRead_<T> per reachable struct type, one _jsonDecode_<T>
+	// one _jsonRead_<T> per reachable struct type, one _jsonDecode_<T>
 	// entry point per top-level Decode[T] type argument. Both are empty (and the
 	// runtime JSON parser is not referenced) for a page that makes no Decode[T]
 	// call — tree-shaking: no Decode, no parser cost.
 	JSONReaders  []JSONReaderData
 	JSONDecoders []JSONDecoderData
 	// JSONWriters / JSONEncoders drive the reflection-free Encode[T] codegen
-	// (Phase 7): one _jsonWrite_<T> per reachable struct type, one _jsonEncode_<T>
+	// one _jsonWrite_<T> per reachable struct type, one _jsonEncode_<T>
 	// entry point per top-level Encode[T] type argument. JSONEncodeHelpers holds
 	// the shared append/escape helper source, emitted only when JSONWriters is
 	// non-empty. All three are empty for a page that makes no Encode[T] call —
@@ -126,7 +126,7 @@ type WasmPageMainData struct {
 }
 
 // JSONFieldDecode is the generated decode statement for one struct field inside
-// a _jsonRead_<Ident> reader (Phase 6, Decode[T]). It reads the field's JSON
+// a _jsonRead_<Ident> reader (Decode[T]). It reads the field's JSON
 // value out of the reader's `m map[string]any` into `out.<Field>`, coercing per
 // D5.
 type JSONFieldDecode struct {
@@ -154,7 +154,7 @@ type JSONDecoderData struct {
 }
 
 // JSONFieldEncode is the generated serialization for one struct field inside a
-// _jsonWrite_<Ident> writer (Phase 7, Encode[T]). KeyPrefixLit is a Go string
+// _jsonWrite_<Ident> writer (Encode[T]). KeyPrefixLit is a Go string
 // literal appended verbatim — the JSON-quoted key plus ':' (and a leading ','
 // for every field after the first) — and ValueLine appends the field's JSON
 // value to the shared *[]byte buffer.
@@ -185,7 +185,7 @@ type ManagerFieldData struct {
 	FieldName   string // Go field name, e.g. "Pings"
 	EncodeLines string // body of inline encode snippet referencing v.<FieldName>
 	DecodeLines string // body of inline decode snippet referencing v.<FieldName>
-	CaptureBody string // body of _capture<FieldName>(d *Decoder) []byte (from Phase 1)
+	CaptureBody string // body of _capture<FieldName>(d *Decoder) []byte
 }
 
 // WasmTopicManagerMainData drives wasm_topic_manager_main.go.tmpl.
@@ -196,7 +196,7 @@ type WasmTopicManagerMainData struct {
 	Codecs        []StructCodecData
 	TopicSnippets []string
 	Fields        []ManagerFieldData // one entry per source struct field, in declaration order
-	// Schema seam (Phase 15): content-hash id + Go-quoted descriptor literal of
+	// Schema seam: content-hash id + Go-quoted descriptor literal of
 	// this topic's wire shape. Threaded into the manager's registration via
 	// GothicRegisterSchema; interpreted by nothing in v3.0.
 	SchemaID            string
@@ -220,7 +220,7 @@ type fieldInfo struct {
 	TypeRef   typeRef // populated by parseStructsFromSource via typeRefFromExpr
 	GothicTag string
 	// JSONTag is the raw value of the field's `json:"..."` struct tag (empty when
-	// absent). Populated for the Decode[T] JSON-codegen path (Phase 6) — the
+	// absent). Populated for the Decode[T] JSON-codegen path — the
 	// reflection-free _jsonRead_<T> reader uses it to pick the JSON object key.
 	JSONTag string
 }

@@ -73,7 +73,7 @@ func (h *WasmHelper) GeneratePage(page WasmPage, outDir string, warnOnce *sync.O
 		fmt.Fprintf(os.Stderr, "wasm: rewrite topic calls %s: %v\n", page.SourceFile, err)
 		os.Exit(1)
 	}
-	// Phase 6: rewrite Decode[T](resp) → _jsonDecode_<Ident>(resp). The runtime
+	// Rewrite Decode[T](resp) → _jsonDecode_<Ident>(resp). The runtime
 	// build has no Decode symbol, so this must run for every page that calls
 	// Decode[T].
 	if len(page.JSONDecodeRoots) > 0 {
@@ -87,7 +87,7 @@ func (h *WasmHelper) GeneratePage(page WasmPage, outDir string, warnOnce *sync.O
 			os.Exit(1)
 		}
 	}
-	// Phase 7: rewrite Encode[T](v) → _jsonEncode_<Ident>(v).
+	// Rewrite Encode[T](v) → _jsonEncode_<Ident>(v).
 	if len(page.JSONEncodeRoots) > 0 {
 		rootIdents := make(map[string]bool, len(page.JSONEncodeRoots))
 		for _, r := range page.JSONEncodeRoots {
@@ -342,8 +342,8 @@ func (h *WasmHelper) GenerateAll(pages []WasmPage, outDir string) error {
 	if err := CleanupLegacyTemplates("."); err != nil {
 		return err
 	}
-	// The shared gothic-core.js runtime (Phase 15) and the prebuilt full-Go static
-	// core (Phase 16) are NO LONGER copied into public/. They are served straight
+	// The shared gothic-core.js runtime and the prebuilt full-Go static
+	// core are NO LONGER copied into public/. They are served straight
 	// from the framework embed via the /_gothic/ route (see pkg/helpers/runtimeassets
 	// and pkg/server), so a framework upgrade updates them for every project with
 	// no file churn and no stale copies.
@@ -359,7 +359,7 @@ func (h *WasmHelper) GenerateAll(pages []WasmPage, outDir string) error {
 
 	warnOnce := &sync.Once{}
 
-	// Phase 17: topics no longer compile to a per-topic MANAGER WASM. The
+	// Topics no longer compile to a per-topic MANAGER WASM. The
 	// always-loaded full-Go static core (served from the framework embed via the
 	// /_gothic/ route) is now the single generic topic hub — it store-and-forwards
 	// every topic's per-field
@@ -446,7 +446,7 @@ func (h *WasmHelper) CopyWasmExec(destDir string) error {
 
 // GenerateTopicManagers builds a per-topic MANAGER WASM for each topic struct.
 //
-// Phase 17 RETIRED this from the build pipeline: GenerateAll no longer calls it,
+// This was RETIRED from the build pipeline: GenerateAll no longer calls it,
 // because the full-Go static core is now the generic topic hub (see the note in
 // GenerateAll). The method and buildTopicManager are kept so the existing
 // unit tests that drive them directly still compile and pass, and so a manager
@@ -609,9 +609,9 @@ func (h *WasmHelper) writeWasmMain(src, body string, stdImports []string, helper
 	if err != nil {
 		return fmt.Errorf("wasm: topic func data: %w", err)
 	}
-	// Phase 6: reflection-free Decode[T] readers + entry points.
+	// Reflection-free Decode[T] readers + entry points.
 	jsonReaderData, jsonDecoderData := h.buildJSONDecodeData(jsonReaders, jsonRoots)
-	// Phase 7: reflection-free Encode[T] writers + entry points. When any writer
+	// Reflection-free Encode[T] writers + entry points. When any writer
 	// is emitted, the shared append/escape helpers (which use strconv) are pulled
 	// in — so "strconv" must be imported.
 	jsonWriterData, jsonEncoderData := h.buildJSONEncodeData(jsonWriters, jsonEncodeRoots)
@@ -645,7 +645,7 @@ func (h *WasmHelper) writeWasmMain(src, body string, stdImports []string, helper
 	}
 	// Strip a trailing `select {}` (or `select{}`) from the user's body before
 	// indenting. The wasm_page_main template now always emits its own haltable
-	// keep-alive (`select { case <-GothicHaltChan(): return }`, Phase 12 instance
+	// keep-alive (`select { case <-GothicHaltChan(): return }`, instance
 	// teardown) at the end of main, so users no longer need to write a keep-alive
 	// themselves. If a user still has the old bare `select {}` boilerplate, we
 	// remove it here so it can't sit before — and dead-code-shadow — the

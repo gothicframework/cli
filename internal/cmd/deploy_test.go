@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
+	gothic_config "github.com/gothicframework/core/config"
 	"github.com/spf13/cobra"
 )
 
@@ -44,8 +45,8 @@ func TestIsValidAction(t *testing.T) {
 }
 
 // TestDeployCleanupRemovesFiles and TestDeployCleanupTolerantOfMissingFiles
-// covered the v2 SAM cleanup() method which was removed in Phase 6.
-// Replacement tests are in Phase 9.
+// covered the v2 SAM cleanup() method (since removed).
+// Replacement tests live alongside.
 
 func TestDeployRunEInvalidAction(t *testing.T) {
 	chdirTemp(t)
@@ -79,7 +80,7 @@ func TestDeployInvalidStageName(t *testing.T) {
 
 // TestDeploySetupSucceeds, TestDeploySetupFailsWithoutDeployConfig,
 // TestDeploySetupCustomDomainRequiresFields covered the v2 setup() method
-// which was removed in Phase 6. Replacement tests are in Phase 9.
+// (since removed). Replacement tests live alongside.
 
 func TestDeployProceedsUntilWasmScan(t *testing.T) {
 	bin := writeFakeTailwind(t, true)
@@ -298,4 +299,28 @@ func TestEnsureGitignoreAppendsMissingOnly(t *testing.T) {
 }
 
 // TestDeploySetupCustomDomainNonUsEast1RequiresArn covered the v2 setup()
-// method removed in Phase 6. Replacement test in Phase 9.
+// method (since removed). Replacement test lives alongside.
+
+// TestDeploy_EmbeddedWarns locks in that an AWS deploy warns when the config uses
+// the EMBEDDED static-files mode (which only bloats the Lambda on AWS) and stays
+// silent otherwise. The message is a pure helper so it is asserted directly,
+// without driving the full Deploy() path (which needs real AWS tooling).
+func TestDeploy_EmbeddedWarns(t *testing.T) {
+	embedded := &gothic_cli.Config{
+		Runtime: gothic_cli.RuntimeConfig{ServeStaticFiles: gothic_config.EMBEDDED},
+	}
+	warn := embeddedOnAWSWarning(embedded)
+	if warn == "" {
+		t.Fatal("expected a warning for EMBEDDED on AWS, got none")
+	}
+	if !strings.Contains(warn, "EMBEDDED") || !strings.Contains(warn, "CDN") {
+		t.Errorf("warning should name EMBEDDED and suggest CDN, got: %q", warn)
+	}
+
+	hotReload := &gothic_cli.Config{
+		Runtime: gothic_cli.RuntimeConfig{ServeStaticFiles: gothic_config.CDN},
+	}
+	if w := embeddedOnAWSWarning(hotReload); w != "" {
+		t.Errorf("expected no warning for CDN, got: %q", w)
+	}
+}

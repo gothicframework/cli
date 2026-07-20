@@ -809,7 +809,7 @@ func (h *WasmHelper) buildServerTopicFuncData(structs []structInfo, aliases map[
 		for _, f := range s.Fields {
 			fd.Fields = append(fd.Fields, TopicFieldData{Name: f.Name, Type: f.Type})
 		}
-		// Schema seam (Phase 15): best-effort; a codec error here is surfaced by
+		// Schema seam: best-effort; a codec error here is surfaced by
 		// the codec build itself. Always leave a VALID Go string literal so the
 		// emitted const compiles even in the (unreachable) error path.
 		fd.SchemaDescriptorLit = `""`

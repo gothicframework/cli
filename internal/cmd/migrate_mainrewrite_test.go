@@ -66,6 +66,14 @@ func TestRewriteMainStock(t *testing.T) {
 	if !strings.Contains(rt, "gothic.RuntimeConfig") || !strings.Contains(rt, "gothic.CACHE_CONTROL_HEADERS") {
 		t.Errorf("runtime literal should carry the default config, got: %q", rt)
 	}
+	// The old StaticFilesMode name must be migrated to the current one (the ordinal
+	// is unchanged; the identifier was renamed HOT_RELOAD_ONLY→CDN).
+	if !strings.Contains(rt, "gothic.CDN") {
+		t.Errorf("runtime literal should rename ServeStaticFiles to gothic.CDN, got: %q", rt)
+	}
+	if strings.Contains(rt, "HOT_RELOAD_ONLY") {
+		t.Errorf("runtime literal should NOT keep the legacy HOT_RELOAD_ONLY name, got: %q", rt)
+	}
 	got, _ := os.ReadFile(p)
 	s := string(got)
 	for _, want := range []string{

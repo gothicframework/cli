@@ -80,3 +80,47 @@ func TestRewriteV2ToV3GoModPinsFrameworkVersions(t *testing.T) {
 		}
 	}
 }
+
+// TestRenameStaticFilesModeConsts covers the cloud-agnostic StaticFilesMode rename:
+// migrate-v3 must rewrite the legacy package-qualified constant names to the current
+// ones (ordinals unchanged: HOT_RELOAD_ONLY→CDN, ALL_ENVS→DISK), and must NOT touch a
+// bare/unqualified identifier that merely shares the name.
+func TestRenameStaticFilesModeConsts(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"gothic.HOT_RELOAD_ONLY", "gothic.CDN"},
+		{"gothic.ALL_ENVS", "gothic.DISK"},
+		{"helpers.ALL_ENVS", "helpers.DISK"},
+		{"config.HOT_RELOAD_ONLY", "config.CDN"},
+		{"gothic.EMBEDDED", "gothic.EMBEDDED"}, // unchanged
+		{"myHOT_RELOAD_ONLY", "myHOT_RELOAD_ONLY"}, // no leading '.', left alone
+		{"ALL_ENVS", "ALL_ENVS"},                   // bare identifier, not package-qualified
+	}
+	for _, c := range cases {
+		if got := renameStaticFilesModeConsts(c.in); got != c.want {
+			t.Errorf("renameStaticFilesModeConsts(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestRewriteV2ToV3File_RenamesStaticFilesMode proves the project-wide file walk
+// rewrites a legacy StaticFilesMode reference even when the file has no framework
+// import line to rewrite (so the enum rename isn't gated on an import change).
+func TestRewriteV2ToV3File_RenamesStaticFilesMode(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "gothic.config.go")
+	const in = "package main\n\nvar Config = gothic.Config{\n\tRuntime: gothic.RuntimeConfig{\n\t\tServeStaticFiles: gothic.ALL_ENVS,\n\t},\n}\n"
+	if err := os.WriteFile(p, []byte(in), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := rewriteV2ToV3File(p)
+	if err != nil {
+		t.Fatalf("rewriteV2ToV3File: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected the file to be rewritten (ALL_ENVS → DISK)")
+	}
+	got, _ := os.ReadFile(p)
+	if s := string(got); !strings.Contains(s, "gothic.DISK") || strings.Contains(s, "ALL_ENVS") {
+		t.Errorf("expected gothic.ALL_ENVS → gothic.DISK, got:\n%s", s)
+	}
+}

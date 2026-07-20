@@ -93,7 +93,7 @@ func _jsonEncode_{{.Ident}}(v {{.GoType}}) []byte {
 {{range .Fields}}		{{.Name}}: NewObservableField({{$fn.StructName}}{}.{{.Name}}),
 {{end}}		_pending: "",
 	}
-	// Schema seam (Phase 15): register this topic's reserved wire descriptor at
+	// Schema seam: register this topic's reserved wire descriptor at
 	// the consumer registration point. Interpreted by nothing in v3.0.
 	GothicRegisterSchema("{{.KeyName}}", "{{.SchemaID}}", {{.SchemaDescriptorLit}})
 {{range .FieldCodecs}}	topic.{{.FieldName}}.SetBroadcast(func() {
@@ -114,7 +114,7 @@ func _jsonEncode_{{.Ident}}(v {{.GoType}}) []byte {
 		{{.DecLines}}
 		topic.{{.FieldName}}.ApplyExternal(v.{{.FieldName}})
 	})
-{{end}}	// Phase 17 two-tier protocol. The per-topic MANAGER WASM is gone; the
+{{end}}	// Two-tier protocol. The per-topic MANAGER WASM is gone; the
 	// always-loaded full-Go static core is the generic hub. The per-field frames
 	// above (RequestTopicSetField / ListenTopicEventField) are the BINARY
 	// DATA-PLANE — the core store-and-forwards them opaquely by key+field, never

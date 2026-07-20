@@ -1,6 +1,6 @@
 package helpers
 
-// go/types-based reader for the Decode[T] JSON codegen (Phase 6).
+// go/types-based reader for the Decode[T] JSON codegen.
 //
 // Detection (collectJSONDecodeRoots) walks a ClientSideState body for
 // `Decode[T](resp)` calls whose callee resolves — via TypesInfo — to the

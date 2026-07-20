@@ -24,7 +24,7 @@ func parseGo(t *testing.T, label, src string) {
 
 // TestTopicTemplatesRenderValidGo renders the consumer (page) and manager
 // templates with a REAL topic struct and asserts both parse as valid Go. This
-// exercises the Phase 15 edits — the version-byte NewDecoder sites, the manager
+// exercises the schema-seam edits — the version-byte NewDecoder sites, the manager
 // _frame wrapper / _rebuildWhole header / SetReqField re-frame, and the schema
 // seam registration — which the empty-topic render tests never touch.
 func TestTopicTemplatesRenderValidGo(t *testing.T) {

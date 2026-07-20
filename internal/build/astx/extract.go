@@ -91,7 +91,7 @@ func ExtractClientSideStateBody(entry Entry) (PageConfigResult, bool, error) {
 		}
 		typeStr := tv.Type.String()
 		// The RouteConfig type moved to github.com/gothicframework/core/router
-		// during the Phase 29 multi-repo split, so its type string is now
+		// during the multi-repo split, so its type string is now
 		// "…/router.RouteConfig[…]". The astx testdata fixtures still use a
 		// package literally named "routes" ("…/helpers/routes.RouteConfig"), so
 		// match both markers. "helpers/routes.RouteConfig" still contains
