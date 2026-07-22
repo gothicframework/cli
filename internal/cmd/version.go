@@ -23,7 +23,7 @@ var CURRENT_VERSION string = "v3.6.0-beta.2"
 // command rewrites the user's go.mod, so a project may bump any of them later.
 // To ship new library versions, bump the entries here.
 var FrameworkModules = []gothci_cli.FrameworkModule{
-	{Path: "github.com/gothicframework/core", Version: "v1.6.0-beta.1"},
+	{Path: "github.com/gothicframework/core", Version: "v1.6.0-beta.2"},
 	{Path: "github.com/gothicframework/components", Version: "v1.3.0-beta.1"},
 	{Path: "github.com/gothicframework/middlewares", Version: "v1.3.0-beta.1"},
 }
