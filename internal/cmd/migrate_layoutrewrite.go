@@ -9,8 +9,9 @@ import (
 
 // rewriteLayoutTemplV3 rewrites a .templ layout in place to the v3 runtime-asset
 // components. A v2 Gothic layout loads htmx from unpkg in its <head>; that <script>
-// is the anchor we swap for @gothicComponents.RuntimeScripts() (which now bundles
-// gothic-core, gothic-core-boot and htmx). The /public/styles.css <link> becomes
+// is the anchor we swap for @gothicComponents.RuntimeScripts() (which emits
+// gothic-core and gothic-core-boot; htmx now ships inside gothic-core.wasm, so the
+// separate htmx <script> is dropped, not replaced). The /public/styles.css <link> becomes
 // @gothicComponents.Styles(), and any leftover hx-ext-amz-content-sha256 <script> —
 // plus any gothic-core* <script> from a partially-migrated project — are dropped.
 //

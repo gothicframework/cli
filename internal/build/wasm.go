@@ -19,8 +19,12 @@ type WasmHelper struct {
 	Version         string
 	BinaryenVersion string
 	ConfigOverride  string
-	cache           *wasmCache
-	astLoader       *astx.Loader
+	// overrideRoot caches the TINYGOROOT that matches ConfigOverride's tinygo
+	// binary. Populated single-threaded by EnsureBinary before any parallel
+	// build starts, then read-only. Empty when no override is configured.
+	overrideRoot string
+	cache        *wasmCache
+	astLoader    *astx.Loader
 }
 
 // WasmCompression is the compression algorithm for compiled WASM output.

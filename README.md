@@ -269,3 +269,7 @@ It backs up `gothic-config.json`, generates `gothic.config.go`, removes SAM arti
 ## Design docs
 
 The framework's design records ship with the [`core`](https://github.com/gothicframework/core) module: `docs/DESIGN-INSPIRATIONS.md`, `docs/adr/` (custom codec, schema seam, two-tier protocol, static full-Go core), and `RELEASE_NOTES_v3.md`.
+
+## Maintainer docs
+
+- [`docs/patched-tinygo-channel.md`](docs/patched-tinygo-channel.md) — routing Gothic to a patched TinyGo build (a fix merged upstream but not yet released), the `‹base›-gothic.‹n›` version convention, the safe-by-default runtime capability profile, and how to cut and retire a patched release.

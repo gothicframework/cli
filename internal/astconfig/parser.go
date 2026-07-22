@@ -71,6 +71,10 @@ func Parse(projectRoot string) (*cli.Config, error) {
 			if s, ok := stringLit(kv.Value); ok {
 				cfg.WasmBinary = s
 			}
+		case "WasmTinyGoVersion":
+			if s, ok := stringLit(kv.Value); ok {
+				cfg.WasmTinyGoVersion = s
+			}
 		case "TailwindBinary":
 			if s, ok := stringLit(kv.Value); ok {
 				cfg.TailwindBinary = s

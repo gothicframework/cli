@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,33 @@ const (
 	wasmMaxRetries      = 3
 	wasmDownloadTimeout = 10 * time.Minute
 )
+
+// TinyGo release hosts. Official builds come from the upstream org; Gothic's
+// patched builds (a fix that is MERGED upstream but not yet in an official
+// release) are hosted on the maintainer's fork under the same release-asset
+// naming as upstream. See cli/docs/patched-tinygo-channel.md.
+const (
+	tinyGoUpstreamReleases = "https://github.com/tinygo-org/tinygo/releases/download"
+	tinyGoForkReleases     = "https://github.com/felipegenef/tinygo/releases/download"
+)
+
+// gothicPatchedVersion matches Gothic's patched-TinyGo version convention:
+// <semver>-gothic.<n> (e.g. "0.41.1-gothic.1"). A version matching this pattern
+// is downloaded from the fork; every other version comes from upstream. The
+// convention is the ONLY routing signal — nothing is hardcoded to a specific
+// patch — so a future 0.42.0-gothic.3 routes to the fork automatically while a
+// bare official 0.42.0 stays on upstream.
+var gothicPatchedVersion = regexp.MustCompile(`^\d+\.\d+\.\d+-gothic\.\d+$`)
+
+// tinyGoReleaseBaseURL returns the GitHub "releases/download" base the TinyGo
+// archive + checksums.txt are fetched from for the given version: the fork for a
+// -gothic.<n> patched pin, upstream otherwise.
+func tinyGoReleaseBaseURL(version string) string {
+	if gothicPatchedVersion.MatchString(version) {
+		return tinyGoForkReleases
+	}
+	return tinyGoUpstreamReleases
+}
 
 func (h *WasmHelper) binaryName() (string, error) {
 	key := h.Runtime + "/" + h.Arch
@@ -112,12 +140,43 @@ func (h *WasmHelper) TinyGoBinary() string {
 	return filepath.Join(h.TinyGoRoot(), "bin", name)
 }
 
+// effectiveTinyGoRoot returns the TINYGOROOT the tinygo invocation should run
+// with. With no override configured, that is the managed toolchain's root. When
+// ConfigOverride is set, an override binary carries its own runtime source tree,
+// so it must be pointed at its OWN root — pinning it to the managed root makes
+// its codegen emit runtime calls the managed root doesn't define, and the build
+// panics with "unknown runtime call". The value is normally precomputed by
+// EnsureBinary (single-threaded, before parallel builds); the lazy fallback
+// covers callers that construct a build command without EnsureBinary first.
+func (h *WasmHelper) effectiveTinyGoRoot() string {
+	if h.ConfigOverride == "" {
+		return h.TinyGoRoot()
+	}
+	if h.overrideRoot != "" {
+		return h.overrideRoot
+	}
+	return h.overrideTinyGoRoot()
+}
+
+// overrideTinyGoRoot resolves the root that matches the override tinygo binary.
+// It asks the binary itself — `tinygo env TINYGOROOT` reports the baked-in root —
+// and falls back to the binary's grandparent directory when that fails (e.g.
+// /path/to/tinygo/build/tinygo → /path/to/tinygo).
+func (h *WasmHelper) overrideTinyGoRoot() string {
+	if out, err := exec.Command(h.ConfigOverride, "env", "TINYGOROOT").Output(); err == nil {
+		if root := strings.TrimSpace(string(out)); root != "" {
+			return root
+		}
+	}
+	return filepath.Dir(filepath.Dir(h.ConfigOverride))
+}
+
 func (h *WasmHelper) Environ() []string {
 	return h.EnvironWithWarn(nil)
 }
 
 func (h *WasmHelper) EnvironWithWarn(warnOnce *sync.Once) []string {
-	root := h.TinyGoRoot()
+	root := h.effectiveTinyGoRoot()
 	binDir := filepath.Join(root, "bin")
 
 	binaryenBinDir := filepath.Join(h.BinaryenRoot(), "bin")
@@ -228,6 +287,9 @@ func (h *WasmHelper) EnsureBinary() error {
 		if _, err := os.Stat(h.ConfigOverride); err != nil {
 			return fmt.Errorf("wasm binary override not found at %q: %w", h.ConfigOverride, err)
 		}
+		// Resolve the override binary's own root once, here on the single build
+		// thread, so the parallel EnvironWithWarn callers only read it.
+		h.overrideRoot = h.overrideTinyGoRoot()
 		return nil
 	}
 
@@ -284,14 +346,9 @@ func (h *WasmHelper) ensureTinyGo() error {
 		return err
 	}
 
-	archiveURL := fmt.Sprintf(
-		"https://github.com/tinygo-org/tinygo/releases/download/v%s/%s",
-		h.Version, archiveName,
-	)
-	checksumURL := fmt.Sprintf(
-		"https://github.com/tinygo-org/tinygo/releases/download/v%s/checksums.txt",
-		h.Version,
-	)
+	base := tinyGoReleaseBaseURL(h.Version)
+	archiveURL := fmt.Sprintf("%s/v%s/%s", base, h.Version, archiveName)
+	checksumURL := fmt.Sprintf("%s/v%s/checksums.txt", base, h.Version)
 
 	fmt.Fprintf(os.Stderr, "wasm: TinyGo %s not found — downloading for %s/%s...\n",
 		h.Version, h.Runtime, h.Arch)
