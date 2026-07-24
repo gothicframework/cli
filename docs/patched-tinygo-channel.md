@@ -1,16 +1,20 @@
 # The patched-TinyGo channel
 
 Gothic compiles each page's client-side WASM with a **pinned, managed TinyGo
-toolchain** (default `0.41.1`, downloaded once into the CLI cache). This document
-is for maintainers who need to ship a **critical TinyGo fix that is already
-merged upstream but not yet in an official TinyGo release** — temporarily routing
-Gothic to a patched TinyGo build hosted on a fork, then reverting to the official
-release once it ships. The mechanism is generic: it works for any such patch, not
-one specific fix.
+toolchain**, downloaded once into the CLI cache. As of the 2026-07 GC release the
+default pin is the patched fork build **`0.42.0-gothic.2`** (upstream PR #5521 +
+#5545: real `syscall/js` finalizers plus an idle-point finalizer-pressure GC), so
+the runtime reclaims `js.Value` bridge slots on its own and the server serves the
+STOCK `wasm_exec` shim. This document is for maintainers who ship such a **TinyGo
+fix that is merged/proposed upstream but not yet in an official release** — routing
+Gothic to a patched build hosted on a fork, then reverting to the official release
+once it ships. The mechanism is generic: it works for any such patch, not one
+specific fix.
 
-Two independent primitives make this work, plus a runtime capability signal.
-Both are **off by default** — a stock checkout builds against official TinyGo
-`0.41.1` with Gothic's manual-GC wasm_exec runtime.
+Two independent primitives make this work, plus a runtime capability signal. The
+channel is **active** now (default pin `0.42.0-gothic.2` → stock shim); a build
+pinned back to bare `0.41.1` is the fallback: official TinyGo with no finalizers,
+paired with Gothic's manual-GC `wasm_exec` runtime.
 
 ---
 
@@ -119,15 +123,24 @@ written by the CLI build — so the build-time capability decision reaches the
 server process through an environment variable, exactly as `GOTHIC_PROVIDER=AWS`
 does for request signing:
 
-- `core/wasmexec` embeds **both** shims and picks one **once at process start**:
-  `GOTHIC_WASM_EXEC=stock` selects the stock shim; unset (the default) selects
-  the manual-GC shim.
-- The CLI sets that variable from `ProfileFor(version).StockWasmExec`:
-  - **`gothic hot-reload`** adds it to the app server it launches.
-  - **`gothic deploy`** injects it into the Lambda environment.
+- `core/wasmexec` embeds **both** shims and picks one **once at process start**
+  from the env var: `GOTHIC_WASM_EXEC=stock` selects the stock shim; unset selects
+  the manual-GC shim. (On the default `0.42.0-gothic.2` pin the CLI sets it to
+  `stock`, so a default build serves the stock shim.)
+- The CLI sets it from `ProfileFor(ResolveTinyGoVersion(cfg.WasmTinyGoVersion)).StockWasmExec`
+  — profiling the **RESOLVED** toolchain (the `WasmTinyGoVersion` pin, else the
+  bundled default), NOT the raw config field. An empty pin therefore resolves to
+  the default `0.42.0-gothic.2` → stock, matching what the build compiled.
+  (Profiling the raw empty field, as the code did before `cli v3.6.0-beta.5`,
+  wrongly picked the manual safe-default and would double-free against a
+  finalizer-carrying build on deploy.)
+  - **`gothic hot-reload`** adds it via `cli.Wasm.WasmExecEnviron()` (which already
+    carries the resolved version) to the app server it launches.
+  - **`gothic deploy`** injects it into the Lambda environment
+    (`engine_aws.go`, via `build.ResolveTinyGoVersion`).
 - For a self-hosted binary you run yourself (DISK/EMBEDDED static modes), set
-  `GOTHIC_WASM_EXEC=stock` in the server environment when you have pinned a
-  finalizer-carrying toolchain.
+  `GOTHIC_WASM_EXEC=stock` in the server environment when you are on the default
+  gothic.2 (or any finalizer-carrying pin).
 
 `WasmExecEnvKey` (`cli/internal/build/wasm_profile.go`) is the single source of
 truth for the variable name, shared by the CLI (which sets it) and
