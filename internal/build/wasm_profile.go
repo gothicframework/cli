@@ -38,6 +38,15 @@ var knownToolchainProfiles = map[string]toolchainProfile{
 	// Patched fork build carrying upstream PR #5521 (real finalizers) → the
 	// manual-GC shim would double-free, so the STOCK shim is required.
 	"0.41.1-gothic.1": {StockWasmExec: true},
+	// PR #5521 finalizers plus the follow-up (upstream PR #5545) that collects
+	// on finalizer pressure at the scheduler's idle point, so js.Value slots are
+	// reclaimed without a manual runtime.GC(). Still finalizer-carrying → STOCK
+	// shim. Built on the 0.42.0 dev line (where #5521 landed).
+	"0.42.0-gothic.1": {StockWasmExec: true},
+	// The #5545 build with the maintainer's review feedback applied (per-goroutine
+	// finishing flag, documented scheduler partition, expanded threshold doc).
+	// Behaviorally identical to gothic.1 → STOCK shim.
+	"0.42.0-gothic.2": {StockWasmExec: true},
 }
 
 // ProfileFor returns the VERIFIED capability profile for a resolved TinyGo

@@ -12,11 +12,12 @@ func TestProfileFor_KnownAndSafeDefault(t *testing.T) {
 	}{
 		// Verified rows.
 		{"0.41.1", false},         // bundled default: no finalizers → manual GC
-		{"0.41.1-gothic.1", true}, // patched fork: finalizers → stock shim
+		{"0.41.1-gothic.1", true}, // patched fork (#5521): finalizers → stock shim
+		{"0.42.0-gothic.1", true}, // patched fork (#5521 + idle-point GC) → stock shim
+		{"0.42.0-gothic.2", true}, // same build with review feedback applied → stock shim
 		// Unknown/unverified → safe default (manual GC), NEVER inferred true.
 		{"0.42.0", false},          // a future bare official release: unverified
-		{"0.42.0-gothic.1", false}, // an unlisted patched pin: unverified
-		{"0.41.1-gothic.2", false}, // a newer patch not yet verified
+		{"0.42.0-gothic.3", false}, // an unlisted patched pin: unverified
 		{"", false},
 		{"garbage", false},
 	}

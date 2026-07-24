@@ -3,11 +3,17 @@ package helpers
 import (
 	"runtime"
 
-	helpers "github.com/gothicframework/core/render"
 	"github.com/gothicframework/cli/v3/internal/build/astx"
+	helpers "github.com/gothicframework/core/render"
 )
 
-const tinyGoVersion = "0.41.1"
+// tinyGoVersion is the default TinyGo toolchain (overridable via
+// WasmTinyGoVersion). It pins the patched fork build that carries the syscall/js
+// finalizers and the idle-point finalizer-pressure GC, so the WASM runtime
+// reclaims js.Value slots on its own and the stock wasm_exec shim is used. A
+// -gothic.<n> version downloads from the fork; see wasm_binary.go and
+// wasm_profile.go, and docs/patched-tinygo-channel.md.
+const tinyGoVersion = "0.42.0-gothic.2"
 const binaryenVersion = "117"
 
 // WasmHelper manages the TinyGo toolchain and compiles WASM pages.
