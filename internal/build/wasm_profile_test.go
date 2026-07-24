@@ -44,3 +44,24 @@ func TestWasmExecEnviron_MatchesProfile(t *testing.T) {
 		t.Errorf("unknown WasmExecEnviron() = %v, want empty (safe default)", got)
 	}
 }
+
+// TestResolveTinyGoVersion pins the build/deploy consistency contract: a config
+// pin passes through, an empty WasmTinyGoVersion resolves to the bundled default
+// (not to ""), and that default MUST profile as a finalizer-carrying (stock-shim)
+// toolchain. Otherwise a deploy with no pin would key GOTHIC_WASM_EXEC off
+// ProfileFor("") (the manual-shim safe default) while the build compiled the
+// finalizer-carrying default → the manual shim + finalizers double-free.
+func TestResolveTinyGoVersion(t *testing.T) {
+	if got := ResolveTinyGoVersion("0.99.9-gothic.7"); got != "0.99.9-gothic.7" {
+		t.Errorf("pin should pass through: got %q", got)
+	}
+	def := ResolveTinyGoVersion("")
+	if def == "" {
+		t.Fatal("empty config must resolve to the bundled default, got empty")
+	}
+	if !ProfileFor(def).StockWasmExec {
+		t.Errorf("bundled default %q must profile StockWasmExec=true; an empty pin "+
+			"must not fall back to the manual shim while the build compiles the "+
+			"finalizer-carrying default", def)
+	}
+}

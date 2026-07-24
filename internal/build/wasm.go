@@ -16,6 +16,21 @@ import (
 const tinyGoVersion = "0.42.0-gothic.2"
 const binaryenVersion = "117"
 
+// ResolveTinyGoVersion returns the effective TinyGo toolchain version for a
+// project: the gothic.config.go WasmTinyGoVersion pin when set, otherwise the
+// bundled default. Every decision that keys off the toolchain version — most
+// importantly the capability profile (ProfileFor) that selects the stock vs
+// manual-GC wasm_exec shim — MUST resolve through this, so the pinned and the
+// default paths agree with what the build actually compiles. Profiling the raw
+// config field instead would read an empty pin as "manual shim" even though the
+// build used the finalizer-carrying default → a build/runtime mismatch.
+func ResolveTinyGoVersion(configVersion string) string {
+	if configVersion != "" {
+		return configVersion
+	}
+	return tinyGoVersion
+}
+
 // WasmHelper manages the TinyGo toolchain and compiles WASM pages.
 // It follows the same struct + method pattern as TailwindHelper and FileBasedRouteHelper.
 type WasmHelper struct {
