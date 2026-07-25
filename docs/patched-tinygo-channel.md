@@ -2,8 +2,9 @@
 
 Gothic compiles each page's client-side WASM with a **pinned, managed TinyGo
 toolchain**, downloaded once into the CLI cache. As of the 2026-07 GC release the
-default pin is the patched fork build **`0.42.0-gothic.2`** (upstream PR #5521 +
-#5545: real `syscall/js` finalizers plus an idle-point finalizer-pressure GC), so
+default pin is the patched fork build **`0.42.0-gothic.3`** (upstream PR #5521 +
+#5545: real `syscall/js` finalizers, an idle-point finalizer-pressure GC, and
+args-pointer clearing on finished tasks), so
 the runtime reclaims `js.Value` bridge slots on its own and the server serves the
 STOCK `wasm_exec` shim. This document is for maintainers who ship such a **TinyGo
 fix that is merged/proposed upstream but not yet in an official release** — routing
@@ -12,7 +13,7 @@ once it ships. The mechanism is generic: it works for any such patch, not one
 specific fix.
 
 Two independent primitives make this work, plus a runtime capability signal. The
-channel is **active** now (default pin `0.42.0-gothic.2` → stock shim); a build
+channel is **active** now (default pin `0.42.0-gothic.3` → stock shim); a build
 pinned back to bare `0.41.1` is the fallback: official TinyGo with no finalizers,
 paired with Gothic's manual-GC `wasm_exec` runtime.
 
@@ -38,7 +39,7 @@ The CLI resolves the TinyGo download host **from the version string alone**
 - Every other version is downloaded from upstream
   **`github.com/tinygo-org/tinygo/releases`**.
 
-Nothing is hardcoded to a specific patch tag, so a future `0.42.0-gothic.3`
+Nothing is hardcoded to a specific patch tag, so a future `0.42.0-gothic.4`
 routes to the fork automatically while a bare official `0.42.0` stays on
 upstream. The release-asset filename scheme
 (`tinygo‹version›.‹platform›.tar.gz` / `.zip`) and the `checksums.txt`
@@ -125,7 +126,7 @@ does for request signing:
 
 - `core/wasmexec` embeds **both** shims and picks one **once at process start**
   from the env var: `GOTHIC_WASM_EXEC=stock` selects the stock shim; unset selects
-  the manual-GC shim. (On the default `0.42.0-gothic.2` pin the CLI sets it to
+  the manual-GC shim. (On the default `0.42.0-gothic.3` pin the CLI sets it to
   `stock`, so a default build serves the stock shim.)
 - The CLI sets it from `ProfileFor(ResolveTinyGoVersion(cfg.WasmTinyGoVersion)).StockWasmExec`
   — profiling the **RESOLVED** toolchain (the `WasmTinyGoVersion` pin, else the

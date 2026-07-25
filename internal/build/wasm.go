@@ -13,7 +13,7 @@ import (
 // reclaims js.Value slots on its own and the stock wasm_exec shim is used. A
 // -gothic.<n> version downloads from the fork; see wasm_binary.go and
 // wasm_profile.go, and docs/patched-tinygo-channel.md.
-const tinyGoVersion = "0.42.0-gothic.2"
+const tinyGoVersion = "0.42.0-gothic.3"
 const binaryenVersion = "117"
 
 // ResolveTinyGoVersion returns the effective TinyGo toolchain version for a

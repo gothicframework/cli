@@ -15,9 +15,10 @@ func TestProfileFor_KnownAndSafeDefault(t *testing.T) {
 		{"0.41.1-gothic.1", true}, // patched fork (#5521): finalizers → stock shim
 		{"0.42.0-gothic.1", true}, // patched fork (#5521 + idle-point GC) → stock shim
 		{"0.42.0-gothic.2", true}, // same build with review feedback applied → stock shim
+		{"0.42.0-gothic.3", true}, // adds args-pointer clearing on finished tasks → stock shim
 		// Unknown/unverified → safe default (manual GC), NEVER inferred true.
 		{"0.42.0", false},          // a future bare official release: unverified
-		{"0.42.0-gothic.3", false}, // an unlisted patched pin: unverified
+		{"0.42.0-gothic.4", false}, // an unlisted patched pin: unverified
 		{"", false},
 		{"garbage", false},
 	}

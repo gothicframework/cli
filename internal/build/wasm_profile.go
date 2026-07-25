@@ -47,6 +47,8 @@ var knownToolchainProfiles = map[string]toolchainProfile{
 	// finishing flag, documented scheduler partition, expanded threshold doc).
 	// Behaviorally identical to gothic.1 → STOCK shim.
 	"0.42.0-gothic.2": {StockWasmExec: true},
+	// Adds args-pointer clearing on finished asyncify tasks → same STOCK shim.
+	"0.42.0-gothic.3": {StockWasmExec: true},
 }
 
 // ProfileFor returns the VERIFIED capability profile for a resolved TinyGo
