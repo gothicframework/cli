@@ -160,7 +160,13 @@ func (command *HotReloadCommand) watchForChanges() {
 	command.rebuild()
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		fmt.Printf("error creating watcher: %v", err)
+		// Returning is mandatory: every watcher call below would deref nil.
+		fmt.Printf("gothic: cannot watch for changes, rebuilds are off: %v\n", err)
+		if strings.Contains(err.Error(), "too many open files") {
+			// A running editor can exhaust the per-user inotify instance limit on its own.
+			fmt.Println("gothic: the inotify instance limit is exhausted — raise fs.inotify.max_user_instances or close other watchers")
+		}
+		return
 	}
 	defer watcher.Close()
 	// Watch the project root directory for changes to main.go and other root-level files
@@ -330,13 +336,10 @@ func (command *HotReloadCommand) rebuild() {
 	command.runCancel = cancel
 
 	runCmd := exec.CommandContext(ctx, command.mainBinaryName)
-	// GOTHIC_MODE=dev enables dev behavior; WasmExecEnviron adds
-	// GOTHIC_WASM_EXEC=stock when the resolved TinyGo toolchain is one VERIFIED
-	// to provide syscall/js finalizers (so the server serves the stock, no
-	// manual-GC wasm_exec shim that pairs with it). It is empty for the default
-	// bundled toolchain, so the server keeps the manual-GC shim.
+	// GOTHIC_MODE=dev enables dev behavior. The wasm_exec shim needs no signal:
+	// the runtime serves the single embedded shim regardless of how the server
+	// was started.
 	runCmd.Env = append(os.Environ(), "GOTHIC_MODE=dev")
-	runCmd.Env = append(runCmd.Env, command.cli.Wasm.WasmExecEnviron()...)
 	runCmd.Stdout = os.Stdout
 	runCmd.Stderr = os.Stderr
 	command.runCmd = runCmd

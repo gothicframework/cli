@@ -19,7 +19,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 
-	build "github.com/gothicframework/cli/v3/internal/build"
 	cli "github.com/gothicframework/cli/v3/internal/cli"
 	"github.com/gothicframework/cli/v3/internal/deploy/docker"
 	"github.com/gothicframework/cli/v3/internal/deploy/tfgen"
@@ -186,17 +185,6 @@ func (e *TofuAwsEngine) buildTfGenParams() tfgen.TfGenParams {
 	// is running on AWS Lambda (mirrors the GOTHIC_MODE pattern). writeEnvResolved
 	// in the generator turns every params.EnvVars entry into a Lambda env var.
 	params.EnvVars["GOTHIC_PROVIDER"] = config.EnvValue{Source: config.RawEnv, Value: "AWS"}
-	// GOTHIC_WASM_EXEC=stock when the RESOLVED TinyGo toolchain (the
-	// WasmTinyGoVersion pin, else the bundled default) is VERIFIED to carry
-	// syscall/js finalizers (its capability profile sets StockWasmExec), so the
-	// Lambda serves the stock, no-manual-GC wasm_exec shim that pairs with it —
-	// matching what the build compiled. Resolving through ResolveTinyGoVersion
-	// (NOT the raw config field) keeps this consistent with the build and the
-	// hot-reload signal: an empty pin means "use the default", not "manual".
-	// See cli/docs/patched-tinygo-channel.md.
-	if build.ProfileFor(build.ResolveTinyGoVersion(e.config.WasmTinyGoVersion)).StockWasmExec {
-		params.EnvVars[build.WasmExecEnvKey] = config.EnvValue{Source: config.RawEnv, Value: "stock"}
-	}
 	// Source-aware domain fields are copied through as-is (nil stays nil); the
 	// generator resolves each into a local via raw value / SSM / Secrets Manager.
 	params.WafArn = stageCfg.WafArn
