@@ -8,12 +8,13 @@ import (
 )
 
 // tinyGoVersion is the default TinyGo toolchain (overridable via
-// WasmTinyGoVersion). It pins the patched fork build that carries the syscall/js
-// finalizers and the idle-point finalizer-pressure GC, so the WASM runtime
-// reclaims js.Value slots on its own and the stock wasm_exec shim is used. A
-// -gothic.<n> version downloads from the fork; see wasm_binary.go and
-// wasm_profile.go, and docs/patched-tinygo-channel.md.
-const tinyGoVersion = "0.42.0-gothic.3"
+// WasmTinyGoVersion). A -gothic.<n> suffix means a build of github.com/tinygo-org/tinygo/pull/5545
+// that upstream has not released yet, downloaded from the fork rather than from
+// tinygo-org; see wasm_binary.go and docs/patched-tinygo-channel.md. It carries the
+// syscall/js finalizers, the idle-point finalizer-pressure GC that drains them, and
+// the per-block registration bitmap that keeps registering one O(1). Swap this for
+// the plain upstream version the moment a release contains that work.
+const tinyGoVersion = "0.42.0-gothic.4"
 const binaryenVersion = "117"
 
 // ResolveTinyGoVersion returns the effective TinyGo toolchain version for a
