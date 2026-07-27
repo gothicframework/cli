@@ -12,7 +12,7 @@ import (
 
 // CURRENT_VERSION is the CLI / product ("generation") version — what `gothic
 // version` prints and what the `cli/v3` module is tagged at.
-var CURRENT_VERSION string = "v3.6.0-beta.9"
+var CURRENT_VERSION string = "v3.6.0-beta.10"
 
 // FrameworkModules are the published framework libraries a freshly-scaffolded
 // project imports, each pinned to the version this CLI scaffolds against. The
@@ -23,8 +23,8 @@ var CURRENT_VERSION string = "v3.6.0-beta.9"
 // command rewrites the user's go.mod, so a project may bump any of them later.
 // To ship new library versions, bump the entries here.
 var FrameworkModules = []gothci_cli.FrameworkModule{
-	{Path: "github.com/gothicframework/core", Version: "v1.6.0-beta.6"},
-	{Path: "github.com/gothicframework/components", Version: "v1.3.0-beta.2"},
+	{Path: "github.com/gothicframework/core", Version: "v1.6.0-beta.7"},
+	{Path: "github.com/gothicframework/components", Version: "v1.3.0-beta.3"},
 	{Path: "github.com/gothicframework/middlewares", Version: "v1.3.0-beta.1"},
 }
 
