@@ -28,7 +28,7 @@ var readme embed.FS
 //go:embed gothic.config.go.tmpl
 var GothicConfigGoTemplate []byte
 
-var env string = `HTTP_LISTEN_ADDR: ":8080"`
+var env string = `HTTP_LISTEN_ADDR: ":60714"`
 
 var gitIgnore string = `.env
 bin

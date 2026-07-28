@@ -12,7 +12,7 @@ import (
 
 // CURRENT_VERSION is the CLI / product ("generation") version — what `gothic
 // version` prints and what the `cli/v3` module is tagged at.
-var CURRENT_VERSION string = "v3.6.0-beta.17"
+var CURRENT_VERSION string = "v3.6.0-beta.18"
 
 // FrameworkModules are the published framework libraries a freshly-scaffolded
 // project imports, each pinned to the version this CLI scaffolds against. The

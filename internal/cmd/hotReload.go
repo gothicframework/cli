@@ -110,7 +110,7 @@ func (command *HotReloadCommand) HotReload() error {
 	}
 	port := os.Getenv("HTTP_LISTEN_ADDR")
 	if port == "" {
-		port = ":8080"
+		port = ":60714"
 	}
 	targetURL, err := url.Parse("http://localhost" + port)
 	if err != nil {

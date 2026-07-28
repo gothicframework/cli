@@ -34,8 +34,8 @@ func TestHotReloadFullPathWithSeams(t *testing.T) {
 	cmd.sleeper = func(time.Duration) {} // no real sleep
 	cmd.proxyRunner = func(target *url.URL) error {
 		// Confirm the target URL was parsed from the default port.
-		if target.Host != "localhost:8080" {
-			t.Errorf("proxy target host = %q, want localhost:8080", target.Host)
+		if target.Host != "localhost:60714" {
+			t.Errorf("proxy target host = %q, want localhost:60714", target.Host)
 		}
 		return nil
 	}
