@@ -70,7 +70,7 @@ func _jsonEncode_{{.Ident}}(v {{.GoType}}) []byte {
 	return b
 }
 {{end}}
-{{range .KeyVars}}var {{.StructName}}Key = BinaryKey("{{.KeyName}}", _encode_{{.StructName}}, _decode_{{.StructName}})
+{{range .KeyVars}}var {{.StructName}}Key = BinaryKey({{.QuotedKeyName}}, _encode_{{.StructName}}, _decode_{{.StructName}})
 
 {{end}}
 {{range .TopicTypes}}type {{.TypeName}} struct {
@@ -95,7 +95,7 @@ func _jsonEncode_{{.Ident}}(v {{.GoType}}) []byte {
 	}
 	// Schema seam: register this topic's reserved wire descriptor at
 	// the consumer registration point. Interpreted by nothing in v3.0.
-	GothicRegisterSchema("{{.KeyName}}", "{{.SchemaID}}", {{.SchemaDescriptorLit}})
+	GothicRegisterSchema({{.QuotedKeyName}}, "{{.SchemaID}}", {{.SchemaDescriptorLit}})
 {{range .FieldCodecs}}	topic.{{.FieldName}}.SetBroadcast(func() {
 		if !topic._online {
 			return
@@ -106,9 +106,9 @@ func _jsonEncode_{{.Ident}}(v {{.GoType}}) []byte {
 		// Per-field broadcast: hand bytes straight to the data-plane (no
 		// string()->[]byte round-trip). Matches _broadcastAll; keeps heavy
 		// (e.g. blob) per-field Set() off the worst-case 3x-copy path.
-		RequestTopicSetFieldBytes("{{$fn.KeyName}}", "{{.FieldName}}", e.Buf)
+		RequestTopicSetFieldBytes({{$fn.QuotedKeyName}}, "{{.FieldName}}", e.Buf)
 	})
-{{end}}{{range .FieldCodecs}}	ListenTopicEventField("{{$fn.KeyName}}", "{{.FieldName}}", func(detail []byte) {
+{{end}}{{range .FieldCodecs}}	ListenTopicEventField({{$fn.QuotedKeyName}}, "{{.FieldName}}", func(detail []byte) {
 		d := NewDecoder(detail)
 		var v {{$fn.StructName}}
 		{{.DecLines}}
@@ -126,7 +126,7 @@ func _jsonEncode_{{.Ident}}(v {{.GoType}}) []byte {
 	// Online hydration is per-field REPLAY: on (re)join the core re-broadcasts each
 	// stored field frame (handled by the ListenTopicEventField handlers above),
 	// THEN announces this ack — so all fields are applied before _online flips.
-	ListenTopicCoreOnline("{{$fn.KeyName}}", func() {
+	ListenTopicCoreOnline({{$fn.QuotedKeyName}}, func() {
 		if !topic._online {
 			topic._online = true
 			// Force the next _broadcastAll to re-send EVERY field so a core that
@@ -140,7 +140,7 @@ func _jsonEncode_{{.Ident}}(v {{.GoType}}) []byte {
 			}
 		}
 	})
-	RegisterTopicWithCore("{{$fn.KeyName}}", []string{ {{range .Fields}}"{{.Name}}", {{end}} })
+	RegisterTopicWithCore({{$fn.QuotedKeyName}}, []string{ {{range .Fields}}"{{.Name}}", {{end}} })
 	return topic
 }
 
@@ -162,7 +162,7 @@ func (c *{{.TypeName}}) _broadcastAll(v {{.StructName}}) {
 {{range .FieldCodecs}}	if !c._seeded || ({{.ChangedExpr}}) {
 		e := NewEncoder(8)
 		{{.EncLines}}
-		RequestTopicSetFieldBytes("{{$fn.KeyName}}", "{{.FieldName}}", e.Buf)
+		RequestTopicSetFieldBytes({{$fn.QuotedKeyName}}, "{{.FieldName}}", e.Buf)
 		c._lastSent{{.FieldName}} = v.{{.FieldName}}
 	}
 {{end}}	c._seeded = true

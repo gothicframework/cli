@@ -49,11 +49,14 @@ var newECRClient = func(cfg aws.Config) ecrClientIface {
 
 // buildContextSkipDirs are top-level names (directories or files) excluded from
 // the tar build context sent to the Docker daemon: large dev-only directories,
-// plus the Go workspace files. A go.work points at absolute host paths that do
-// not exist inside the image, so shipping it breaks `go build` in the container
-// ("cannot load module … listed in go.work file"). The walk below treats a
-// matched non-dir entry as a plain skip, so listing the files here works.
-var buildContextSkipDirs = []string{".gothicCli", "optimize", "node_modules", ".git", "go.work", "go.work.sum"}
+// secrets, local cache directories, and the Go workspace files. A go.work
+// points at absolute host paths that do not exist inside the image, so shipping
+// it breaks `go build` in the container ("cannot load module … listed in go.work
+// file"). Files like .env, .gothic-cache, and gothic_outputs.json must never
+// reach the Docker daemon because they may contain secrets, build cache, or
+// deploy outputs. The walk below treats a matched non-dir entry as a plain skip,
+// so listing the files here works.
+var buildContextSkipDirs = []string{".gothicCli", ".gothic-cache", ".env", ".git", "gothic_outputs.json", "go.work", "go.work.sum", "node_modules", "optimize"}
 
 // DockerEngine builds the Gothic Lambda image and pushes it to ECR.
 type DockerEngine struct {

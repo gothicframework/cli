@@ -66,6 +66,7 @@ type bootstrapS3Iface interface {
 	CreateBucket(ctx context.Context, params *s3.CreateBucketInput, optFns ...func(*s3.Options)) (*s3.CreateBucketOutput, error)
 	PutBucketVersioning(ctx context.Context, params *s3.PutBucketVersioningInput, optFns ...func(*s3.Options)) (*s3.PutBucketVersioningOutput, error)
 	PutBucketEncryption(ctx context.Context, params *s3.PutBucketEncryptionInput, optFns ...func(*s3.Options)) (*s3.PutBucketEncryptionOutput, error)
+	PutPublicAccessBlock(ctx context.Context, params *s3.PutPublicAccessBlockInput, optFns ...func(*s3.Options)) (*s3.PutPublicAccessBlockOutput, error)
 }
 
 // bootstrapDDBIface is the subset of the DynamoDB SDK client used while
@@ -240,6 +241,18 @@ func (e *TofuAwsEngine) bootstrapStateBucket(ctx context.Context) error {
 		},
 	}); err != nil {
 		return fmt.Errorf("enabling encryption on state bucket %q: %w", e.stateBucket, err)
+	}
+
+	if _, err := s3Client.PutPublicAccessBlock(ctx, &s3.PutPublicAccessBlockInput{
+		Bucket: aws.String(e.stateBucket),
+		PublicAccessBlockConfiguration: &s3types.PublicAccessBlockConfiguration{
+			BlockPublicAcls:       aws.Bool(true),
+			IgnorePublicAcls:      aws.Bool(true),
+			BlockPublicPolicy:     aws.Bool(true),
+			RestrictPublicBuckets: aws.Bool(true),
+		},
+	}); err != nil {
+		return fmt.Errorf("blocking public access on state bucket %q: %w", e.stateBucket, err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Created state bucket %s\n", e.stateBucket)

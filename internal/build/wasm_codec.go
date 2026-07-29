@@ -6,6 +6,7 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
+	"strconv"
 	"strings"
 )
 
@@ -634,7 +635,7 @@ func (h *WasmHelper) buildKeyVarData(structs []structInfo) []KeyVarData {
 		if s.KeyName == "" {
 			continue
 		}
-		result = append(result, KeyVarData{StructName: s.Name, KeyName: s.KeyName})
+		result = append(result, KeyVarData{StructName: s.Name, KeyName: s.KeyName, QuotedKeyName: strconv.Quote(s.KeyName)})
 	}
 	return result
 }
@@ -767,10 +768,11 @@ func (h *WasmHelper) buildWasmTopicFuncData(structs []structInfo, aliases map[st
 			continue
 		}
 		fd := WasmTopicFuncData{
-			CtorName:   h.topicFuncNameFor(s),
-			TypeName:   h.topicTypeName(s.Name),
-			StructName: s.Name,
-			KeyName:    s.KeyName,
+			CtorName:      h.topicFuncNameFor(s),
+			TypeName:      h.topicTypeName(s.Name),
+			StructName:    s.Name,
+			KeyName:       s.KeyName,
+			QuotedKeyName: strconv.Quote(s.KeyName),
 		}
 		for _, f := range s.Fields {
 			fd.Fields = append(fd.Fields, TopicFieldData{Name: f.Name, Type: f.Type})

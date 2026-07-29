@@ -19,8 +19,9 @@ type StructCodecData struct {
 
 // KeyVarData holds data for a BinaryKey var declaration.
 type KeyVarData struct {
-	StructName string
-	KeyName    string
+	StructName    string
+	KeyName       string
+	QuotedKeyName string // strconv.Quote(KeyName) — safe for template interpolation
 }
 
 // TopicFieldData holds data for one field in a topic struct.
@@ -59,6 +60,7 @@ type WasmTopicFuncData struct {
 	TypeName    string
 	StructName  string
 	KeyName     string
+	QuotedKeyName string // strconv.Quote(KeyName) — safe for template interpolation
 	Fields      []TopicFieldData
 	FieldCodecs []PerFieldCodec // one entry per source struct field, in declaration order
 	// Schema seam: content-hash id + Go-quoted descriptor literal of

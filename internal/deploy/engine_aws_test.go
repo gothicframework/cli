@@ -20,10 +20,11 @@ import (
 // --- S3 bootstrap mock ---
 
 type mockBootstrapS3 struct {
-	headErr        error
-	createCalled   bool
-	versioningCall bool
-	encryptionCall bool
+	headErr              error
+	createCalled         bool
+	versioningCall       bool
+	encryptionCall       bool
+	publicAccessBlockCall bool
 }
 
 func (m *mockBootstrapS3) HeadBucket(ctx context.Context, _ *s3.HeadBucketInput, _ ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
@@ -43,6 +44,10 @@ func (m *mockBootstrapS3) PutBucketVersioning(ctx context.Context, _ *s3.PutBuck
 func (m *mockBootstrapS3) PutBucketEncryption(ctx context.Context, _ *s3.PutBucketEncryptionInput, _ ...func(*s3.Options)) (*s3.PutBucketEncryptionOutput, error) {
 	m.encryptionCall = true
 	return &s3.PutBucketEncryptionOutput{}, nil
+}
+func (m *mockBootstrapS3) PutPublicAccessBlock(ctx context.Context, _ *s3.PutPublicAccessBlockInput, _ ...func(*s3.Options)) (*s3.PutPublicAccessBlockOutput, error) {
+	m.publicAccessBlockCall = true
+	return &s3.PutPublicAccessBlockOutput{}, nil
 }
 
 // --- DynamoDB bootstrap mock ---
@@ -98,6 +103,9 @@ func TestBootstrapStateBucketCreatesWhenAbsent(t *testing.T) {
 	if !s3m.versioningCall || !s3m.encryptionCall {
 		t.Error("expected versioning + encryption to be enabled on a new bucket")
 	}
+	if !s3m.publicAccessBlockCall {
+		t.Error("expected PutPublicAccessBlock to be called on a new bucket")
+	}
 }
 
 func TestBootstrapStateBucketSkipsWhenPresent(t *testing.T) {
@@ -108,6 +116,9 @@ func TestBootstrapStateBucketSkipsWhenPresent(t *testing.T) {
 	}
 	if s3m.createCalled {
 		t.Error("CreateBucket should NOT be called when the bucket already exists")
+	}
+	if s3m.publicAccessBlockCall {
+		t.Error("PutPublicAccessBlock should NOT be called when the bucket already exists")
 	}
 }
 

@@ -355,7 +355,7 @@ func (h *WasmHelper) ensureTinyGo() error {
 
 	expected, checksumErr := h.fetchExpectedChecksum(checksumURL, archiveName)
 	if checksumErr != nil {
-		fmt.Fprintf(os.Stderr, "wasm: WARNING — checksums.txt unavailable (%v); proceeding without pre-verification\n", checksumErr)
+		return fmt.Errorf("wasm: verifying TinyGo toolchain: checksums.txt unavailable: %w (refusing to install an unverified toolchain)", checksumErr)
 	}
 
 	tmpArchive, err := h.downloadToTemp(archiveURL)
@@ -364,19 +364,10 @@ func (h *WasmHelper) ensureTinyGo() error {
 	}
 	defer os.Remove(tmpArchive)
 
-	if expected != "" {
-		if err := h.verifyChecksum(tmpArchive, expected); err != nil {
-			return err
-		}
-		fmt.Fprintln(os.Stderr, "wasm: checksum OK")
-	} else {
-		if digest, err := h.computeChecksum(tmpArchive); err == nil {
-			platform := h.Runtime + "-" + h.Arch
-			localChecksum := filepath.Join(dir, "tinygo-"+h.Version, platform+".sha256")
-			_ = os.MkdirAll(filepath.Dir(localChecksum), 0755)
-			_ = os.WriteFile(localChecksum, []byte(digest), 0644)
-		}
+	if err := h.verifyChecksum(tmpArchive, expected); err != nil {
+		return err
 	}
+	fmt.Fprintln(os.Stderr, "wasm: checksum OK")
 
 	platform := h.Runtime + "-" + h.Arch
 	finalDir := filepath.Join(dir, "tinygo-"+h.Version, platform)

@@ -8,11 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/gothicframework/cli/v3/internal/build/astx"
 )
+
+// goIdentRe matches a valid Go identifier (exported or unexported).
+var goIdentRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // Topic scanning and parsing.
 //
@@ -317,8 +321,16 @@ func (h *WasmHelper) topicFuncNameFor(s structInfo) string {
 	return h.topicFuncName(s.Name)
 }
 
+// isValidGoIdent reports whether s is a valid Go identifier.
+func isValidGoIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	return goIdentRe.MatchString(s)
+}
+
 // collectCreateTopicMetas walks the AST for `var _ = CreateTopic(T{},
-// TopicConfig{Name: "...", Compression: BROTLI})` (or any assignment whose RHS
+// TopicConfig{Name: "...", Compression: BROTLI}` (or any assignment whose RHS
 // is such a call) and returns a map from the underlying struct type name T to
 // the extracted metadata.
 //
@@ -367,6 +379,13 @@ func collectCreateTopicMetas(f *ast.File) map[string]topicMeta {
 				}
 				// SubscriberFnName overrides the accessor name when set.
 				if subscriberFnName != "" {
+					if !isValidGoIdent(subscriberFnName) {
+						fmt.Fprintf(os.Stderr,
+							"error: SubscriberFnName %q is not a valid Go identifier in CreateTopic(%s{}, ...).\n"+
+								"  SubscriberFnName must match ^[a-zA-Z_][a-zA-Z0-9_]*$.\n",
+							subscriberFnName, structName)
+						os.Exit(1)
+					}
 					accessorName = subscriberFnName
 				}
 				metas[structName] = topicMeta{KeyName: name, Compression: compression, Compiler: compiler, AccessorName: accessorName}

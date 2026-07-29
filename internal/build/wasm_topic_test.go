@@ -190,6 +190,39 @@ func TestTopicFuncNameFor_FallbackToStructName(t *testing.T) {
 	}
 }
 
+func TestIsValidGoIdent(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"empty string", "", false},
+		{"single lowercase letter", "a", true},
+		{"single uppercase letter", "A", true},
+		{"underscore only", "_", true},
+		{"leading digit", "0abc", false},
+		{"leading digit underscore", "_0abc", true},
+		{"valid camelCase", "myFunction", true},
+		{"valid PascalCase", "MyFunction", true},
+		{"with digits mid", "fn42", true},
+		{"trailing digit", "x1", true},
+		{"contains hyphen", "my-fn", false},
+		{"contains dot", "pkg.Fn", false},
+		{"contains space", "my fn", false},
+		{"unicode letter", "αβγ", false},
+		{"keyword-like", "if", true},        // "if" IS a valid Go identifier syntactically
+		{"underscore prefix", "_hidden", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isValidGoIdent(tt.input)
+			if got != tt.want {
+				t.Errorf("isValidGoIdent(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseFieldTag(t *testing.T) {
 	h := &WasmHelper{}
 	tests := []struct {

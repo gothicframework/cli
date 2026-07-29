@@ -1,7 +1,11 @@
 package buildtools
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 type TailwindHelper struct {
@@ -67,6 +72,12 @@ func (h *TailwindHelper) EnsureBinary() (string, error) {
 	}
 
 	if err := h.downloadBinary(url, cachedPath); err != nil {
+		return "", err
+	}
+
+	// Verify the downloaded binary's SHA-256 checksum against the release checksums file.
+	if err := h.verifyDownload(cachedPath, name); err != nil {
+		os.Remove(cachedPath)
 		return "", err
 	}
 
@@ -202,6 +213,93 @@ func (h *TailwindHelper) downloadBinary(url, destPath string) error {
 
 	success = true
 	return nil
+}
+
+// verifyDownload fetches the sha256sums.txt for the release, looks up the binary
+// by name, and verifies the downloaded file's SHA-256 matches. On any failure it
+// returns an error so the caller can clean up the downloaded file.
+func (h *TailwindHelper) verifyDownload(filePath, binaryName string) error {
+	sums, err := h.fetchSHA256SUMS()
+	if err != nil {
+		return fmt.Errorf("tailwind: checksum verification failed: %w", err)
+	}
+
+	// sha256sums.txt uses a "./" prefix before the asset name.
+	key := "./" + binaryName
+	expected, ok := sums[key]
+	if !ok {
+		return fmt.Errorf("tailwind: checksum not found for %s in sha256sums.txt", binaryName)
+	}
+
+	actual, err := h.sha256File(filePath)
+	if err != nil {
+		return fmt.Errorf("tailwind: checksum verification failed: %w", err)
+	}
+
+	if !strings.EqualFold(actual, expected) {
+		return fmt.Errorf("tailwind: checksum mismatch for %s\n  expected: %s\n  actual:   %s", binaryName, expected, actual)
+	}
+	return nil
+}
+
+// fetchSHA256SUMS downloads the sha256sums.txt file for the pinned Tailwind
+// version and returns a map of asset name (with "./" prefix) → SHA-256 hex digest.
+func (h *TailwindHelper) fetchSHA256SUMS() (map[string]string, error) {
+	url := fmt.Sprintf("%s/%s/sha256sums.txt", downloadBaseURL, h.Version)
+
+	resp, err := http.Get(url) //nolint:noctx
+	if err != nil {
+		return nil, fmt.Errorf("fetching sha256sums.txt from %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fetching sha256sums.txt: HTTP %d from %s", resp.StatusCode, url)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading sha256sums.txt: %w", err)
+	}
+
+	sums := make(map[string]string)
+	sc := bufio.NewScanner(bytes.NewReader(body))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		// Format: "<sha256>  ./<asset-name>"
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		sums[fields[1]] = fields[0]
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("scanning sha256sums.txt: %w", err)
+	}
+
+	if len(sums) == 0 {
+		return nil, fmt.Errorf("sha256sums.txt is empty")
+	}
+
+	return sums, nil
+}
+
+// sha256File computes the SHA-256 hex digest of the file at filePath.
+func (h *TailwindHelper) sha256File(filePath string) (string, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	hh := sha256.New()
+	if _, err := io.Copy(hh, f); err != nil {
+		return "", fmt.Errorf("hashing %s: %w", filePath, err)
+	}
+	return hex.EncodeToString(hh.Sum(nil)), nil
 }
 
 // DefaultTailwindHelper creates a TailwindHelper using the current runtime's OS and architecture.

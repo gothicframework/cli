@@ -152,3 +152,72 @@ func TestCheckDaemonSucceedsWhenReachable(t *testing.T) {
 		t.Errorf("CheckDaemon: %v", err)
 	}
 }
+
+func TestBuildTarContextExcludesSkipDirsAndFiles(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	// Files that should be EXCLUDED.
+	if err := os.WriteFile(filepath.Join(projectRoot, ".env"), []byte("SECRET=leak"), 0o644); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectRoot, ".gothic-cache"), 0o755); err != nil {
+		t.Fatalf("mkdir .gothic-cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, ".gothic-cache", "x"), []byte("cache-data"), 0o644); err != nil {
+		t.Fatalf("write .gothic-cache/x: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "gothic_outputs.json"), []byte(`{"key":"value"}`), 0o644); err != nil {
+		t.Fatalf("write gothic_outputs.json: %v", err)
+	}
+
+	// Files that SHOULD be included.
+	if err := os.WriteFile(filepath.Join(projectRoot, "keep.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatalf("write keep.go: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectRoot, "public"), 0o755); err != nil {
+		t.Fatalf("mkdir public: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "public", "a.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write public/a.txt: %v", err)
+	}
+
+	injectedDockerfile := []byte("FROM scratch\n")
+	buf, err := buildTarContext(projectRoot, injectedDockerfile)
+	if err != nil {
+		t.Fatalf("buildTarContext: %v", err)
+	}
+	tarBytes := buf.Bytes()
+
+	// Files that must be present.
+	if got := tarEntry(t, tarBytes, "keep.go"); got == nil {
+		t.Error("expected keep.go to be in the tar archive")
+	}
+	if got := tarEntry(t, tarBytes, "public/a.txt"); got == nil {
+		t.Error("expected public/a.txt to be in the tar archive")
+	}
+
+	// Injected Dockerfile must be present.
+	dockerfileEntry := tarEntry(t, tarBytes, "Dockerfile")
+	if dockerfileEntry == nil {
+		t.Fatal("expected injected Dockerfile to be in the tar archive")
+	}
+	if !bytes.Equal(dockerfileEntry, injectedDockerfile) {
+		t.Errorf("injected Dockerfile content mismatch: got %q, want %q", dockerfileEntry, injectedDockerfile)
+	}
+
+	// Files that must NOT be present.
+	if got := tarEntry(t, tarBytes, ".env"); got != nil {
+		t.Error("expected .env to be excluded from the tar archive")
+	}
+	if got := tarEntry(t, tarBytes, ".gothic-cache/x"); got != nil {
+		t.Error("expected .gothic-cache/x to be excluded from the tar archive")
+	}
+	if got := tarEntry(t, tarBytes, "gothic_outputs.json"); got != nil {
+		t.Error("expected gothic_outputs.json to be excluded from the tar archive")
+	}
+
+	// The marker string from .env must not appear anywhere in the tar bytes.
+	if bytes.Contains(tarBytes, []byte("SECRET=leak")) {
+		t.Error("tar archive contains contents of excluded .env file")
+	}
+}

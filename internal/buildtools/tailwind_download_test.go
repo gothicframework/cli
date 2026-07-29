@@ -1,11 +1,15 @@
 package buildtools
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -86,13 +90,29 @@ func TestDownloadBinaryUnreachable(t *testing.T) {
 	}
 }
 
-func TestEnsureBinaryCacheMissDownloads(t *testing.T) {
-	var gotPath string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("fake-tailwind-binary"))
+// checksumServer is a test helper that creates an httptest.Server which serves
+// a fixed binary content and its SHA-256 checksums. Specify wantBinary to get the
+// binary content (also used to compute the checksum), and optionally a custom
+// checksumsReply to replace the correct checksum for mismatch testing.
+func checksumServer(t *testing.T, wantBinary string, checksumsReply ...string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "sha256sums") {
+			if len(checksumsReply) > 0 && checksumsReply[0] != "" {
+				w.Write([]byte(checksumsReply[0]))
+			} else {
+				sum := sha256.Sum256([]byte(wantBinary))
+				fmt.Fprintf(w, "%s  ./tailwindcss-linux-x64\n", hex.EncodeToString(sum[:]))
+			}
+			return
+		}
+		w.Write([]byte(wantBinary))
 	}))
+}
+
+func TestEnsureBinaryCacheMissDownloads(t *testing.T) {
+	const body = "fake-tailwind-binary"
+	srv := checksumServer(t, body)
 	defer srv.Close()
 
 	// Redirect the download base URL at the test server and the cache dir at a
@@ -111,12 +131,7 @@ func TestEnsureBinaryCacheMissDownloads(t *testing.T) {
 	}
 
 	// The constructed URL must encode version + platform asset name.
-	wantPath := "/v3.4.14/tailwindcss-linux-x64"
-	if gotPath != wantPath {
-		t.Errorf("download URL path = %q, want %q", gotPath, wantPath)
-	}
-
-	wantPath = filepath.Join(cacheRoot, "bin", "tailwindcss-linux-x64")
+	wantPath := filepath.Join(cacheRoot, "bin", "tailwindcss-linux-x64")
 	if path != wantPath {
 		t.Errorf("returned path = %q, want %q", path, wantPath)
 	}
@@ -129,8 +144,72 @@ func TestEnsureBinaryCacheMissDownloads(t *testing.T) {
 		t.Error("cached binary should be executable")
 	}
 	got, _ := os.ReadFile(path)
-	if string(got) != "fake-tailwind-binary" {
-		t.Errorf("cached binary content = %q", string(got))
+	if string(got) != body {
+		t.Errorf("cached binary content = %q, want %q", string(got), body)
+	}
+}
+
+func TestEnsureBinaryCacheMiss_ChecksumMismatch(t *testing.T) {
+	const body = "fake-tailwind-binary"
+	// Serve a sha256sums.txt with a deliberately wrong checksum.
+	badSum := "0000000000000000000000000000000000000000000000000000000000000000"
+	srv := checksumServer(t, body, badSum+"  ./tailwindcss-linux-x64\n")
+	defer srv.Close()
+
+	origBase := downloadBaseURL
+	downloadBaseURL = srv.URL
+	defer func() { downloadBaseURL = origBase }()
+
+	cacheRoot := t.TempDir()
+	t.Setenv("GOTHIC_CLI_CACHE_DIR", cacheRoot)
+
+	h := NewTailwindHelper("linux", "amd64")
+	_, err := h.EnsureBinary()
+	if err == nil {
+		t.Fatal("EnsureBinary expected error for checksum mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Errorf("error = %v, want 'checksum mismatch'", err)
+	}
+
+	// The downloaded file must have been removed on failure.
+	cachedPath := filepath.Join(cacheRoot, "bin", "tailwindcss-linux-x64")
+	if _, statErr := os.Stat(cachedPath); statErr == nil {
+		t.Error("downloaded binary was NOT removed after checksum mismatch")
+	}
+}
+
+func TestEnsureBinaryCacheMiss_ChecksumSourceMissing(t *testing.T) {
+	const body = "fake-tailwind-binary"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "sha256sums") {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	origBase := downloadBaseURL
+	downloadBaseURL = srv.URL
+	defer func() { downloadBaseURL = origBase }()
+
+	cacheRoot := t.TempDir()
+	t.Setenv("GOTHIC_CLI_CACHE_DIR", cacheRoot)
+
+	h := NewTailwindHelper("linux", "amd64")
+	_, err := h.EnsureBinary()
+	if err == nil {
+		t.Fatal("EnsureBinary expected error for missing checksum source, got nil")
+	}
+	if !strings.Contains(err.Error(), "checksum verification failed") {
+		t.Errorf("error = %v, want 'checksum verification failed'", err)
+	}
+
+	// The downloaded file must have been removed on failure.
+	cachedPath := filepath.Join(cacheRoot, "bin", "tailwindcss-linux-x64")
+	if _, statErr := os.Stat(cachedPath); statErr == nil {
+		t.Error("downloaded binary was NOT removed after checksum source missing")
 	}
 }
 

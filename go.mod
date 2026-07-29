@@ -14,8 +14,8 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gen2brain/webp v0.6.4
-	github.com/gothicframework/components v1.3.0-beta.5
-	github.com/gothicframework/core v1.6.0-beta.11
+	github.com/gothicframework/components v1.3.0-beta.6
+	github.com/gothicframework/core v1.6.0-beta.12
 	github.com/hashicorp/terraform-exec v0.25.2
 	github.com/joho/godotenv v1.5.1
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
@@ -98,3 +98,6 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )
+
+// Local development: resolve siblings from the workspace.
+// Remove before publishing.
