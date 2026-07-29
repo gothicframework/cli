@@ -9,7 +9,6 @@ import (
 	"{{.GoModName}}/src/routes"
 	"github.com/gothicframework/middlewares"
 
-	"github.com/go-chi/chi/middleware"
 	"github.com/go-chi/chi/v5"
 	"github.com/joho/godotenv"
 )
@@ -18,7 +17,7 @@ func {{.MainServerFunctionName}} {
 	godotenv.Load()
 
 	router := chi.NewMux()
-	router.Use(middleware.Logger)
+	router.Use(middlewares.Logger())
 
 	// Gothic's runtime as one chi middleware: caching, /public/* static serving, the
 	// OptimizedImage endpoint and every built-in route feature — all driven by the
@@ -30,6 +29,9 @@ func {{.MainServerFunctionName}} {
 	routes.RegisterFileBasedRoutes(router)
 
 	port := os.Getenv("HTTP_LISTEN_ADDR")
-	slog.Info("application running", "port", port)
+	// Hot reload restarts the app on every rebuild and the CLI already printed the address.
+	if os.Getenv("GOTHIC_MODE") != "dev" {
+		slog.Info("application running", "port", port)
+	}
 	log.Fatal(http.ListenAndServe(port, router))
 }

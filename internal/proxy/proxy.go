@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/andybalholm/brotli"
+	"github.com/gothicframework/cli/v3/internal/output"
 	"golang.org/x/net/html"
 
 	_ "embed"
@@ -97,7 +98,7 @@ func (proxy *ProxyHelper) RunProxy(bind string, port int, target *url.URL) error
 
 	proxy.buildProxy(target)
 
-	log.Printf("Starting proxy at %s -> %s\n", proxy.URL, target)
+	output.Println("%s %s -> %s", output.Tag("PROXY"), output.Link(proxy.URL), output.Link(fmt.Sprint(target)))
 
 	if err := http.ListenAndServe(fmt.Sprintf("%s:%d", bind, port), proxy); err != nil {
 		return fmt.Errorf("failed to start proxy server: %w", err)
@@ -112,7 +113,7 @@ func (proxy *ProxyHelper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Content-Type", "text/javascript")
 		_, err := io.WriteString(w, reloadScriptJS)
 		if err != nil {
-			log.Printf("failed to write script: %v\n", err)
+			output.Errorln("cannot write the reload script: %v", err)
 		}
 		return
 
@@ -292,7 +293,7 @@ func (proxy *ProxyHelper) modifyResponse(r *http.Response) error {
 	csp := r.Header.Get("Content-Security-Policy")
 	updated, err := proxy.insertScriptTagIntoBody(proxy.parseNonce(csp), string(body))
 	if err != nil {
-		log.Printf("Unable to insert reload script for %s: %v", urlStr, err)
+		output.Errorln("cannot insert the reload script for %s: %v", urlStr, err)
 		updated = string(body)
 	}
 

@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 
 	templgen "github.com/a-h/templ/cmd/templ/generatecmd"
+	"github.com/gothicframework/cli/v3/internal/output"
 	templcache "github.com/gothicframework/core/render"
 )
 
@@ -19,7 +22,24 @@ type TemplHelper struct {
 // []string{"generate", "-f", file}. The default below preserves the exact
 // previous behavior (same context, stdout/stderr, and argument forwarding).
 var generate = func(args []string) error {
-	return templgen.Run(context.Background(), os.Stdout, os.Stderr, args)
+	// The generator narrates its own event loop, which duplicates the phase the
+	// hot-reload stream already reports. Only that narration is dropped;
+	// diagnostics still reach the terminal.
+	out := output.NewLineFilter(os.Stdout, isTemplNoise)
+	errOut := output.NewLineFilter(os.Stderr, isTemplNoise)
+	return templgen.Run(context.Background(), out, errOut, args)
+}
+
+// The generator's progress chatter: a per-event "Post-generation event
+// received..." line and the "Complete [...]" summary that follows it, both
+// prefixed with a check mark.
+var templProgressRe = regexp.MustCompile(`^\(.\)\s*(Post-generation event received|Complete\b)`)
+
+func isTemplNoise(line string) bool {
+	// The generator colours its level icon, so the raw line starts with an
+	// escape sequence rather than the "(" the pattern anchors on.
+	t := strings.TrimSpace(output.StripANSI(line))
+	return t == "" || templProgressRe.MatchString(t)
 }
 
 func NewTemplHelper() TemplHelper {

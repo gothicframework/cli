@@ -2,10 +2,18 @@ package helpers
 
 import (
 	"runtime"
+	"sync/atomic"
 
 	"github.com/gothicframework/cli/v3/internal/build/astx"
 	helpers "github.com/gothicframework/core/render"
 )
+
+// wasmBuildCounts holds atomic counters for GenerateAll.
+// Behind a pointer so WasmHelper stays copyable.
+type wasmBuildCounts struct {
+	upToDate atomic.Int32
+	built    atomic.Int32
+}
 
 // tinyGoVersion is the default TinyGo toolchain (overridable via
 // WasmTinyGoVersion). A -gothic.<n> suffix means a build of github.com/tinygo-org/tinygo/pull/5545
@@ -44,6 +52,10 @@ type WasmHelper struct {
 	overrideRoot string
 	cache        *wasmCache
 	astLoader    *astx.Loader
+
+	// counts holds atomic build counters behind a pointer so WasmHelper
+	// stays copyable (avoids go vet warnings when passed by value).
+	counts *wasmBuildCounts
 }
 
 // WasmCompression is the compression algorithm for compiled WASM output.
@@ -117,6 +129,7 @@ func NewWasmHelper(goos, goarch string) WasmHelper {
 		Arch:            goarch,
 		Version:         tinyGoVersion,
 		BinaryenVersion: binaryenVersion,
+		counts:          &wasmBuildCounts{},
 	}
 }
 

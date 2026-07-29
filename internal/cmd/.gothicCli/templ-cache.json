@@ -1,0 +1,4 @@
+{
+  "testdata/migrate_v2/after/page.templ": "ca0640cfa5b03c85f5fac403c697057a1538292bf57c5dca0af3dc918a50d4ae",
+  "testdata/migrate_v2/before/page.templ": "6bb2ffa2ce3eed94e0e942613f1f38682cc72bb200307c40d8fc2f4e5d8b88a4"
+}

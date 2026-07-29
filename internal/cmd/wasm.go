@@ -107,7 +107,7 @@ func newWasmBuildCommand(cli gothic_cli.GothicCli) RunEFunc {
 			}
 		}
 		topics := cli.Wasm.CountTopicManagers()
-		fmt.Printf(wasmTimestamp()+" "+wasmTag+" wasm: found %s, %s, %s\n",
+		fmt.Printf(wasmTimestamp()+" "+wasmTag()+" wasm: found %s, %s, %s\n",
 			wasmCount(nPages, "page(s)"),
 			wasmCount(nComponents, "component(s)"),
 			wasmCount(topics, "topic manager(s)"))

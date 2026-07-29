@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/gothicframework/cli/v3/internal/output"
 )
 
 // ---------------------------------------------------------------------------
@@ -500,11 +503,85 @@ func TestWasmLogHelpers_DoNotPanic(t *testing.T) {
 	if wasmTimestamp() == "" {
 		t.Error("empty timestamp")
 	}
-	wasmUpToDate("page")
 	wasmLogf("building %s", "x")
 	wasmErrorf("oops %d", 1)
 	wasmWarnf("careful %s", "y")
 	wasmBuildResult("page", "10KB", "3KB", "gzip")
+}
+
+func TestWasmBuildAggregateCounts(t *testing.T) {
+	h := &WasmHelper{counts: &wasmBuildCounts{}}
+	// Simulate: 2 cache hits (up to date), 1 build.
+	h.counts.upToDate.Add(1)
+	h.counts.upToDate.Add(1)
+	h.counts.built.Add(1)
+
+	if got := h.counts.upToDate.Load(); got != 2 {
+		t.Errorf("upToDate = %d, want 2", got)
+	}
+	if got := h.counts.built.Load(); got != 1 {
+		t.Errorf("built = %d, want 1", got)
+	}
+}
+
+func TestGenerateAllCountersReset(t *testing.T) {
+	h := &WasmHelper{counts: &wasmBuildCounts{}}
+	h.counts.upToDate.Add(3)
+	h.counts.built.Add(2)
+	// Simulate reset like GenerateAll would.
+	h.counts = &wasmBuildCounts{}
+	if got := h.counts.upToDate.Load(); got != 0 {
+		t.Errorf("after reset upToDate = %d, want 0", got)
+	}
+	if got := h.counts.built.Load(); got != 0 {
+		t.Errorf("after reset built = %d, want 0", got)
+	}
+}
+
+func TestWasmLogDedup(t *testing.T) {
+	output.ResetDedup()
+
+	out := captureStdoutLog(t, func() {
+		wasmLogf("building %s", "dedup-target")
+		wasmLogf("building %s", "dedup-target")
+	})
+	if !strings.Contains(out, "(x2)") {
+		t.Errorf("dedup output missing (x2): %q", out)
+	}
+}
+
+func TestWasmLogDedup_ResetOnDifferentMessage(t *testing.T) {
+	output.ResetDedup()
+
+	out := captureStdoutLog(t, func() {
+		wasmLogf("message %d", 1)
+		wasmLogf("message %d", 2)
+	})
+	if strings.Contains(out, "(x") {
+		t.Errorf("different messages should not produce dedup suffix: %q", out)
+	}
+}
+
+// captureStdoutLog redirects os.Stdout for fn and returns captured output.
+func captureStdoutLog(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	defer func() { os.Stdout = orig }()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+
+	fn()
+
+	_ = w.Close()
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("copy: %v", err)
+	}
+	return buf.String()
 }
 
 // ---------------------------------------------------------------------------

@@ -31,13 +31,13 @@ const (
 	Bold  = "\033[1m"
 	Under = "\033[4m"
 
-	White  = "\033[37m"       // timestamps / neutral
-	Cyan   = "\033[36m"       // names, values, URLs
+	White  = "\033[37m"       // message text / neutral
+	Cyan   = "\033[36m"       // reserved: the OPTIONS verb in the request log
 	Red    = "\033[31m"       // errors, destroy
-	Yellow = "\033[33m"       // warnings, update/replace
+	Yellow = "\033[38;5;221m" // warnings, update/replace
 	Green  = "\033[38;5;120m" // success, create
-	Blue   = "\033[38;5;75m"  // secondary numbers
-	Purple = "\033[38;5;183m" // Gothic accent / rules / the WASM tag
+	Blue   = "\033[38;5;75m"  // locations (docs #60a5fa): paths, URLs, names
+	Purple = "\033[38;5;135m" // Gothic accent (docs #a855f7) / the WASM tag
 	Gray   = "\033[38;5;244m" // dim / secondary text / diff comments
 )
 

@@ -1,6 +1,7 @@
 package buildtools
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // cachedFakeBinary sets up GOTHIC_CLI_CACHE_DIR with a fake cached tailwind
@@ -93,7 +95,7 @@ func TestTailwindWatchStart(t *testing.T) {
 	h := NewTailwindHelper("linux", "amd64")
 	h.ConfigOverride = script
 
-	cmd, err := h.WatchStart()
+	cmd, err := h.WatchStart(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,7 +109,44 @@ func TestTailwindWatchStart(t *testing.T) {
 func TestTailwindWatchStartResolveError(t *testing.T) {
 	h := NewTailwindHelper("linux", "amd64")
 	h.ConfigOverride = "/nonexistent/tailwind"
-	if _, err := h.WatchStart(); err == nil {
+	if _, err := h.WatchStart(context.Background()); err == nil {
 		t.Fatal("expected error resolving binary")
+	}
+}
+
+func TestTailwindWatchStartDiesWithContext(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary not portable to windows")
+	}
+	// A fake watcher that ignores nothing and just runs forever, standing in
+	// for the real `tailwindcss --watch=always`.
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-tailwind-watch.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nwhile true; do sleep 1; done\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewTailwindHelper("linux", "amd64")
+	h.ConfigOverride = script
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd, err := h.WatchStart(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	// Cancelling the session context must take the watcher down with it.
+	cancel()
+
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
+	select {
+	case <-waited:
+	case <-time.After(15 * time.Second):
+		t.Fatalf("watcher pid %d outlived its context", pid)
+	}
+	if cmd.ProcessState == nil {
+		t.Error("expected the watcher to have a final process state")
 	}
 }

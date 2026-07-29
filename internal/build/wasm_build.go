@@ -10,8 +10,8 @@ import (
 	"strings"
 	"sync"
 
-	wasmexec "github.com/gothicframework/core/wasmexec"
 	wasmruntime "github.com/gothicframework/core/wasm"
+	wasmexec "github.com/gothicframework/core/wasmexec"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -36,11 +36,16 @@ func (h *WasmHelper) GeneratePage(page WasmPage, outDir string, warnOnce *sync.O
 		outPath := filepath.Join(outDir, page.OutputName+".wasm"+compressedExt)
 		if h.cache.upToDate(page.OutputName, hash) {
 			if _, err := os.Stat(outPath); err == nil {
-				wasmUpToDate(page.OutputName)
+				h.counts.upToDate.Add(1)
 				return nil
 			}
 		}
 	}
+	// Announce before the slow part: a TinyGo compile can take ten seconds or
+	// more, and without this the terminal goes silent between the save and the
+	// size report with nothing to explain the wait.
+	wasmLogf("%s", wasmPath("Recompiling "+page.OutputName+"..."))
+
 	// Remove stale files from any previous compression method.
 	for _, ext := range []string{".gz", ".br"} {
 		if ext != compressedExt {
@@ -162,6 +167,7 @@ func (h *WasmHelper) GeneratePage(page WasmPage, outDir string, warnOnce *sync.O
 
 	finalSize, _ := h.fileSize(finalFile)
 	wasmBuildResult(page.OutputName, h.formatBytes(wasmSize), h.formatBytes(finalSize), compressionLabel(page.Compression))
+	h.counts.built.Add(1)
 	if hash != "" {
 		h.cache.update(page.OutputName, hash)
 	}
@@ -359,6 +365,9 @@ func (h *WasmHelper) GenerateAll(pages []WasmPage, outDir string) error {
 
 	warnOnce := &sync.Once{}
 
+	// Reset build counters so each call to GenerateAll starts from zero.
+	h.counts = &wasmBuildCounts{}
+
 	// Topics no longer compile to a per-topic MANAGER WASM. The
 	// always-loaded full-Go static core (served from the framework embed via the
 	// /_gothic/ route) is now the single generic topic hub — it store-and-forwards
@@ -383,6 +392,19 @@ func (h *WasmHelper) GenerateAll(pages []WasmPage, outDir string) error {
 	}
 	if err := g.Wait(); err != nil {
 		return err
+	}
+
+	up := h.counts.upToDate.Load()
+	built := h.counts.built.Load()
+	if up > 0 || built > 0 {
+		switch {
+		case built > 0 && up > 0:
+			wasmLogf("%s up to date, %s rebuilt", wasmNum(up), wasmNum(built))
+		case built > 0:
+			wasmLogf("%s rebuilt", wasmNum(built))
+		case up > 0:
+			wasmLogf("%s up to date", wasmNum(up))
+		}
 	}
 
 	h.cache.save()
@@ -481,11 +503,13 @@ func (h *WasmHelper) buildTopicManager(s structInfo, snippets []string, allStruc
 		outPath := filepath.Join(outDir, wasmName+".wasm"+compressionExt(compression))
 		if h.cache.upToDate(wasmName, hash) {
 			if _, err := os.Stat(outPath); err == nil {
-				wasmUpToDate(wasmName)
+				h.counts.upToDate.Add(1)
 				return nil
 			}
 		}
 	}
+	wasmLogf("%s", wasmPath("Recompiling "+wasmName+"..."))
+
 	// Remove stale files from any previous compression method.
 	for _, ext := range []string{".gz", ".br"} {
 		if ext != compressionExt(compression) {
@@ -594,6 +618,7 @@ func (h *WasmHelper) buildTopicManager(s structInfo, snippets []string, allStruc
 
 	compSize, _ := h.fileSize(compOutFile)
 	wasmBuildResult(wasmName, h.formatBytes(wasmSize), h.formatBytes(compSize), compressionLabel(compression))
+	h.counts.built.Add(1)
 	if hash != "" {
 		h.cache.update(wasmName, hash)
 	}
@@ -664,15 +689,15 @@ func (h *WasmHelper) writeWasmMain(src, body string, stdImports []string, helper
 	}
 
 	return h.Template.UpdateFromTemplateFS(WasmTemplateFS, tmplWasmPageMain, dest, WasmPageMainData{
-		SourceFile:    src,
-		StdImports:    stdImports,
-		Codecs:        codecs,
-		KeyVars:       h.buildKeyVarData(topicStructs),
-		TopicTypes:    h.buildTopicTypeData(topicStructs),
-		WasmFuncs:     wasmFuncs,
-		TopicSnippets: topicSnippets,
-		Body:          indented.String(),
-		Helpers:       helpers,
+		SourceFile:        src,
+		StdImports:        stdImports,
+		Codecs:            codecs,
+		KeyVars:           h.buildKeyVarData(topicStructs),
+		TopicTypes:        h.buildTopicTypeData(topicStructs),
+		WasmFuncs:         wasmFuncs,
+		TopicSnippets:     topicSnippets,
+		Body:              indented.String(),
+		Helpers:           helpers,
 		Multiplexed:       multiplexed,
 		JSONReaders:       jsonReaderData,
 		JSONDecoders:      jsonDecoderData,

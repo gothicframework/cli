@@ -12,9 +12,24 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
+	"time"
+
+	"github.com/gothicframework/cli/v3/internal/output"
 )
+
+// The watcher's per-scan chatter: a "Rebuilding..." announcement, a "Done in
+// 96ms." completion, and the blank lines that pad them.
+var tailwindDoneRe = regexp.MustCompile(`^Done in [0-9.]+m?s\.?$`)
+
+func isTailwindNoise(line string) bool {
+	// Stripped first so the match survives a future version that colours these.
+	t := strings.TrimSpace(output.StripANSI(line))
+	return t == "" || t == "Rebuilding..." || tailwindDoneRe.MatchString(t)
+}
 
 type TailwindHelper struct {
 	Runtime        string // runtime.GOOS
@@ -98,16 +113,31 @@ func (h *TailwindHelper) Build() error {
 	return nil
 }
 
-// WatchStart starts the Tailwind CSS watcher (non-blocking).
-func (h *TailwindHelper) WatchStart() (*exec.Cmd, error) {
+// WatchStart starts the Tailwind CSS watcher (non-blocking). The watcher is
+// bound to ctx: cancelling it shuts the watcher down, so it cannot outlive the
+// session that started it and keep holding memory and inotify handles.
+func (h *TailwindHelper) WatchStart(ctx context.Context) (*exec.Cmd, error) {
 	bin, err := h.EnsureBinary()
 	if err != nil {
 		return nil, fmt.Errorf("error resolving tailwind binary: %w", err)
 	}
 
-	cmd := exec.Command(bin, "--watch=always", "-i", "src/css/app.css", "-o", "public/styles.css", "--minify")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := exec.CommandContext(ctx, bin, "--watch=always", "-i", "src/css/app.css", "-o", "public/styles.css", "--minify")
+	// CommandContext defaults to SIGKILL. Ask for a clean exit first so the
+	// watcher can release its inotify handles, and let WaitDelay force the
+	// issue if it does not go.
+	cmd.Cancel = func() error {
+		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			return cmd.Process.Kill()
+		}
+		return nil
+	}
+	cmd.WaitDelay = 5 * time.Second
+	// The watcher narrates every scan, including the ones that change nothing,
+	// and the hot-reload loop already prints its own phase lines. Only the
+	// noise is dropped; warnings and errors still reach the terminal.
+	cmd.Stdout = output.NewLineFilter(os.Stdout, isTailwindNoise)
+	cmd.Stderr = output.NewLineFilter(os.Stderr, isTailwindNoise)
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start tailwind watch process: %w", err)

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,11 +89,11 @@ func TestScheduleRebuildResetsTimer(t *testing.T) {
 
 	// First call arms the debounce timer; second call must reset (not leak) it.
 	// Immediately stop it so the 150ms rebuild() never fires (rebuild shells out).
-	cmd.scheduleRebuild()
+	cmd.scheduleRebuild("")
 	if cmd.debounceTimer == nil {
 		t.Fatal("expected debounceTimer to be armed")
 	}
-	cmd.scheduleRebuild()
+	cmd.scheduleRebuild("")
 	cmd.debounceMu.Lock()
 	stopped := cmd.debounceTimer.Stop()
 	cmd.debounceMu.Unlock()
@@ -132,26 +133,44 @@ func TestWatchTailwindChangesStartFailure(t *testing.T) {
 	cmd.watchTailwindChanges()
 }
 
-// Crash/deadlock guard only — proves watchTailwindChanges starts the watch
-// process and its reaper goroutine without panicking when the binary launches
-// successfully. The spawned process and reaper have no observable seam, so
-// only the no-panic/no-deadlock property is exercised here.
+// Crash/deadlock guard — proves the supervisor starts the watcher, survives its
+// immediate exit, and returns once the restart budget is spent.
 func TestWatchTailwindChangesStartsFakeBinary(t *testing.T) {
 	bin := writeFakeTailwind(t, true)
 	chdirTemp(t)
-	// Fake tailwind exits 0 immediately, so WatchStart's cmd.Start() succeeds,
-	// the PID is logged, and the wait-goroutine reaps the short-lived process.
+	// The fake exits 0 at once, so the supervisor sees an unexpected death and
+	// walks its whole restart budget before returning.
 	writeConfig(t, `{"projectName":"demo","goModuleName":"demo","tailwindBinary":"`+bin+`"}`)
 	cli := gothic_cli.NewCli()
 	if _, err := cli.GetConfig(); err != nil {
 		t.Fatalf("config: %v", err)
 	}
 	cmd := newHotReloadCommandCli(&cli)
+	cmd.sleeper = func(time.Duration) {}
 	cmd.watchTailwindChanges()
-	// Give the reaper goroutine a moment to observe the quick exit. Not
-	// strictly required for coverage, but keeps the goroutine from outliving
-	// the test in a confusing way.
-	time.Sleep(50 * time.Millisecond)
+}
+
+// The restart budget must be finite: a watcher that keeps dying is a broken
+// config, and looping forever would bury the real error under restart noise.
+func TestWatchTailwindChangesGivesUpAfterBudget(t *testing.T) {
+	bin := writeFakeTailwind(t, false)
+	chdirTemp(t)
+	writeConfig(t, `{"projectName":"demo","goModuleName":"demo","tailwindBinary":"`+bin+`"}`)
+	cli := gothic_cli.NewCli()
+	if _, err := cli.GetConfig(); err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	cmd := newHotReloadCommandCli(&cli)
+	cmd.sleeper = func(time.Duration) {}
+
+	out := captureStdout(t, func() { cmd.watchTailwindChanges() })
+
+	if n := strings.Count(out, "restarting it"); n != maxTailwindRestarts {
+		t.Errorf("expected %d restart notices, got %d: %s", maxTailwindRestarts, n, out)
+	}
+	if !strings.Contains(out, "giving up") {
+		t.Errorf("the supervisor must say it stopped trying: %s", out)
+	}
 }
 
 func TestRebuildProceedsUntilGoBuild(t *testing.T) {
