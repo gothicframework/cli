@@ -41,6 +41,23 @@ func wasmCount(n int, label string) string {
 	return fmt.Sprintf(ansiLightGreen()+"%d"+ansiWhite()+" %s", n, label)
 }
 
+// wasmSummaryLine builds the one aggregate line a rebuild cycle prints, with
+// both counts in the count colour and the stage duration appended. A zero side
+// is omitted rather than printed: a pass that rebuilt nothing should not
+// advertise "0 rebuilt". Returns "" when there was nothing to report at all,
+// which is the no-pages case.
+func wasmSummaryLine(upToDate, rebuilt int32, elapsed string) string {
+	switch {
+	case rebuilt > 0 && upToDate > 0:
+		return fmt.Sprintf("%s, %s in %s", wasmCount(int(upToDate), "up to date"), wasmCount(int(rebuilt), "rebuilt"), elapsed)
+	case rebuilt > 0:
+		return fmt.Sprintf("%s in %s", wasmCount(int(rebuilt), "rebuilt"), elapsed)
+	case upToDate > 0:
+		return fmt.Sprintf("%s in %s", wasmCount(int(upToDate), "up to date"), elapsed)
+	}
+	return ""
+}
+
 func wasmErrorf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	output.PrintRaw(wasmTimestamp() + " " + wasmTag() + " " + ansiRed() + msg + ansiReset())

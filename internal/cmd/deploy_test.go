@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -82,7 +83,7 @@ func TestDeployInvalidStageName(t *testing.T) {
 // TestDeploySetupCustomDomainRequiresFields covered the v2 setup() method
 // (since removed). Replacement tests live alongside.
 
-func TestDeployProceedsUntilWasmScan(t *testing.T) {
+func TestDeployRunsFrontEndBuildBeforeAnyAwsCall(t *testing.T) {
 	bin := writeFakeTailwind(t, true)
 	chdirTemp(t)
 	scaffoldSrc(t)
@@ -91,19 +92,29 @@ func TestDeployProceedsUntilWasmScan(t *testing.T) {
 		"deploy":{"region":"us-east-1","profile":"default","stages":{"dev":{}}}
 	}`)
 
-	// setup + Templ.Render + Router.Render + Tailwind.Build (fake) all succeed,
-	// then Wasm.ScanPages fails outside a real Go module. This exercises the
-	// bulk of Deploy() without ever reaching AWS/SAM. cleanup() also runs via
-	// the deferred call.
+	// Exercises the bulk of Deploy() without ever reaching AWS: Templ.Render,
+	// FileBasedRouter.Render, Tailwind.Build (fake) and the WASM scan all run,
+	// then the container-image stage fails because the scaffold is not a
+	// buildable image context. cleanup() also runs via the deferred call.
 	cmd := newTestDeployCommand()
 	err := cmd.Deploy("dev", "deploy")
 	if err == nil {
-		t.Fatal("expected Deploy to fail at wasm scan stage")
+		t.Fatal("expected Deploy to fail before reaching AWS")
 	}
-	// Assert the failure originates from the wasm-scan stage specifically, not
-	// from some earlier step. Deploy() wraps the scan error with "wasm:".
-	if !strings.Contains(err.Error(), "wasm") {
-		t.Fatalf("expected wasm-scan error, got: %v", err)
+
+	// The routes codegen writes this file, so its presence proves Deploy got
+	// through the templ and routes stages rather than bailing at config.
+	if _, statErr := os.Stat(filepath.Join("src", "routes", "routes_gen.go")); statErr != nil {
+		t.Fatalf("routes codegen did not run before the failure: %v (deploy error: %v)", statErr, err)
+	}
+
+	// The scan finds no ClientSideState pages in an empty scaffold and returns
+	// cleanly. It reports load errors only for the packages it was asked to
+	// scan, not for unresolved dependencies, so a scaffold whose module graph
+	// is incomplete no longer stops the deploy here. Deploy() is the only
+	// caller that wraps a scan failure with this prefix.
+	if strings.Contains(err.Error(), "wasm: scan pages") {
+		t.Fatalf("expected the wasm scan to succeed on an empty scaffold, got: %v", err)
 	}
 }
 

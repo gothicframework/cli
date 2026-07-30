@@ -11,7 +11,7 @@ import (
 // These tests drive GeneratePage / buildTopicManager through their full
 // HERMETIC prologue (temp module setup, runtime extraction, module bridge,
 // topic collection, source rewriting, main.go rendering, stale-file cleanup)
-// up to — but not through — the toolchain build step. The build step is forced
+// up to, but not through, the toolchain build step. The build step is forced
 // to fail fast and offline by pointing the compiler at a non-existent binary
 // via ConfigOverride, so no TinyGo/Go compile and no network access occur. We
 // assert the call returns an error (the build could not run), which is the
@@ -49,7 +49,7 @@ func TestGeneratePage_PrologueRunsThenBuildFails(t *testing.T) {
 		Compiler:    WasmCompilerGothicTinyGo,
 	}
 
-	err := h.GeneratePage(page, outDir, &sync.Once{})
+	err := h.GeneratePage(page, outDir, &sync.Once{}, topicCodegenData{})
 	if err == nil {
 		t.Fatal("expected GeneratePage to fail at the build step in a toolchain-less env")
 	}

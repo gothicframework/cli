@@ -18,6 +18,17 @@ import (
 // goIdentRe matches a valid Go identifier (exported or unexported).
 var goIdentRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
+// topicCodegenData bundles the four return values of collectTopicSnippets so they
+// can be computed once per build (in GenerateAll) and threaded into GeneratePage
+// as a single argument, avoiding redundant disk reads and concurrent writes to
+// the user's source tree from per-page goroutines.
+type topicCodegenData struct {
+	snippets   []string
+	structs    []structInfo
+	aliases    map[string]string
+	refAliases map[string]typeRef
+}
+
 // Topic scanning and parsing.
 //
 // Reads src/topics/*.go, parses struct definitions and type aliases,
@@ -87,7 +98,7 @@ func (h *WasmHelper) collectTopicSnippets() (snippets []string, structs []struct
 		}
 		if prev, exists := seenKeys[s.KeyName]; exists {
 			fmt.Fprintf(os.Stderr,
-				"error: duplicate topic key name %q — used by both %s and %s in %s/.\n"+
+				"error: duplicate topic key name %q, used by both %s and %s in %s/.\n"+
 					"  Each topic struct must have a unique key name.\n",
 				s.KeyName, prev, s.Name, sourceDir)
 			os.Exit(1)
@@ -128,7 +139,7 @@ func (h *WasmHelper) collectTopicSnippets() (snippets []string, structs []struct
 // PregenerateTopicStubs runs the topic_gen.go generation pass without invoking
 // the WASM build. This is required before ScanPages so the `func PageTopic()`
 // (etc.) accessors exist as real symbols by the time go/packages loads the
-// project — otherwise pages that call `PageTopic()` fail to type-check.
+// project, otherwise pages that call `PageTopic()` fail to type-check.
 //
 // Safe to call repeatedly; a no-op when no src/topics/ dir exists.
 func (h *WasmHelper) PregenerateTopicStubs() {
@@ -204,7 +215,7 @@ func (h *WasmHelper) parseStructsFromSource(src string) (structs []structInfo, t
 			}
 			switch t := ts.Type.(type) {
 			case *ast.Ident:
-				// type MyInt int  — record the alias
+				// type MyInt int , record the alias
 				typeAliases[ts.Name.Name] = t.Name
 				typeRefAliases[ts.Name.Name] = Named{Name: t.Name}
 			case *ast.ArrayType, *ast.MapType, *ast.StarExpr:
@@ -234,7 +245,7 @@ func (h *WasmHelper) parseStructsFromSource(src string) (structs []structInfo, t
 						si.Fields = append(si.Fields, fieldInfo{Name: name.Name, Type: typ, TypeRef: tref, GothicTag: tag, JSONTag: jsonTag})
 					}
 				}
-				// New: CreateTopic(T{}, TopicConfig{...}) — apply metadata if
+				// New: CreateTopic(T{}, TopicConfig{...}), apply metadata if
 				// any call references this struct type.
 				if meta, ok := topicMetas[si.Name]; ok {
 					si.KeyName = meta.KeyName
@@ -335,7 +346,7 @@ func isValidGoIdent(s string) bool {
 // the extracted metadata.
 //
 // The first call argument must be a composite literal whose Type is an
-// identifier — e.g. `MyStruct{}`. The second argument must be a TopicConfig
+// identifier, e.g. `MyStruct{}`. The second argument must be a TopicConfig
 // composite literal; its Name/Compression fields are read by key.
 func collectCreateTopicMetas(f *ast.File) map[string]topicMeta {
 	metas := make(map[string]topicMeta)
@@ -369,7 +380,7 @@ func collectCreateTopicMetas(f *ast.File) map[string]topicMeta {
 				name, compression, compiler, subscriberFnName := parseTopicConfigArg(call.Args[1])
 				// Capture the var name (e.g. "PageTopic" from "var PageTopic = CreateTopic(...)").
 				// If the var is blank ("_") or missing, fall back to struct-derived name.
-				// No warning — blank identifier on disk is the CLI's own normalized form
+				// No warning, blank identifier on disk is the CLI's own normalized form
 				// after rewriting "var PageTopic = CreateTopic(...)" → "var _ = CreateTopic(...)".
 				var accessorName string
 				if i < len(vs.Names) {
@@ -403,7 +414,7 @@ func isCreateTopicCall(fun ast.Expr) bool {
 	case *ast.SelectorExpr:
 		return f.Sel != nil && f.Sel.Name == "CreateTopic"
 	case *ast.IndexExpr:
-		// CreateTopic[T] — generic instantiation form
+		// CreateTopic[T], generic instantiation form
 		return isCreateTopicCall(f.X)
 	case *ast.IndexListExpr:
 		return isCreateTopicCall(f.X)
@@ -413,7 +424,7 @@ func isCreateTopicCall(fun ast.Expr) bool {
 
 // topicStructNameFromArg extracts the struct type name from the first
 // argument to CreateTopic. Accepts a composite literal (T{}) or a bare type
-// identifier (T) — the latter is unusual but defensive.
+// identifier (T), the latter is unusual but defensive.
 func topicStructNameFromArg(arg ast.Expr) string {
 	switch a := arg.(type) {
 	case *ast.CompositeLit:
@@ -437,9 +448,9 @@ func topicStructNameFromArg(arg ast.Expr) string {
 // parseCompressionExpr resolves a Compression field value expression to an
 // internal WasmCompression. Accepted forms:
 //
-//	"BROTLI"          — legacy string literal (backward compatible)
-//	BROTLI            — bare identifier (dot-import)
-//	wasm.BROTLI       — selector expression (qualified import)
+//	"BROTLI"         , legacy string literal (backward compatible)
+//	BROTLI           , bare identifier (dot-import)
+//	wasm.BROTLI      , selector expression (qualified import)
 //
 // Anything else (including GZIP / wasm.GZIP) maps to the default WasmCompressionGzip.
 func parseCompressionExpr(expr ast.Expr) WasmCompression {
@@ -529,7 +540,7 @@ func parseCompilerExpr(expr ast.Expr) WasmCompilerChoice {
 // collides with the user's original var declaration.
 //
 // It is intentionally line-based (not AST-rewrite) to preserve formatting and
-// comments exactly as the user authored them — only the leading "var Name ="
+// comments exactly as the user authored them, only the leading "var Name ="
 // fragment changes.
 func normalizeTopicDeclarations(sourceDir string, structs []structInfo) error {
 	// Build set of accessor names per file. We don't know which file each

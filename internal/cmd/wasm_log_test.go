@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gothicframework/cli/v3/internal/output"
 	"github.com/gothicframework/cli/v3/internal/termcolor"
 )
 
@@ -103,4 +104,41 @@ func TestWasmTagConstant(t *testing.T) {
 	if !strings.Contains(wasmTag(), "WASM") {
 		t.Errorf("wasmTag %q should contain WASM", wasmTag())
 	}
+}
+
+// TestWasmSummaryLine pins the one aggregate line a rebuild cycle prints: both
+// counts carry the count colour, a zero side is omitted rather than printed as
+// "0 rebuilt", and the no-pages case prints nothing at all.
+func TestWasmSummaryLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		upToDate int32
+		rebuilt  int32
+		want     string
+	}{
+		{"both sides", 39, 1, "39 up to date, 1 rebuilt in 2.4s"},
+		{"nothing cached", 0, 3, "3 rebuilt in 2.4s"},
+		{"nothing rebuilt", 40, 0, "40 up to date in 2.4s"},
+		{"no pages", 0, 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := output.StripANSI(wasmSummaryLine(tt.upToDate, tt.rebuilt, "2.4s"))
+			if got != tt.want {
+				t.Errorf("wasmSummaryLine(%d, %d) = %q, want %q", tt.upToDate, tt.rebuilt, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestWasmSummaryLineColoursTheCounts guards the reason this helper exists: the
+// numbers must carry the count colour, not fall back to the message colour.
+func TestWasmSummaryLineColoursTheCounts(t *testing.T) {
+	withTermColor(t, func() {
+		got := wasmSummaryLine(39, 1, "2.4s")
+		green := ansiLightGreen()
+		if !strings.Contains(got, green+"39") || !strings.Contains(got, green+"1") {
+			t.Errorf("counts are not in the count colour: %q", got)
+		}
+	})
 }

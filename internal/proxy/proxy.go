@@ -42,11 +42,14 @@ type ProxyHelper struct {
 	Sse    *sseHandler
 }
 
-// RoundTripper with retries
+// RoundTripper with retries and capped exponential backoff. The delay ceiling
+// keeps the transport suitable as a readiness mechanism, unbounded growth
+// buys nothing when the goal is to wait for the backend to start.
 type roundTripper struct {
 	maxRetries      int
 	initialDelay    time.Duration
 	backoffExponent float64
+	maxDelay        time.Duration // per-attempt ceiling; 0 = no cap
 }
 
 // SSE event and handler (migrated from the sse package)
@@ -60,6 +63,10 @@ type sseHandler struct {
 	m        *sync.Mutex
 	counter  int64
 	requests map[int64]chan event
+	// buildState is the latest badge-worthy event (building or builderror), or
+	// nil once the build settles. It is replayed to every new subscriber so a
+	// page that reloads mid-compile knows a compile is still running.
+	buildState *event
 }
 
 func NewProxyHelper() ProxyHelper {
@@ -85,6 +92,7 @@ func (proxy *ProxyHelper) buildProxy(target *url.URL) {
 		maxRetries:      20,
 		initialDelay:    100 * time.Millisecond,
 		backoffExponent: 1.5,
+		maxDelay:        250 * time.Millisecond,
 	}
 
 	proxy.Target = target
@@ -134,18 +142,67 @@ func (proxy *ProxyHelper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // SSE methods
 
+// Send delivers an event to every live subscriber. The per-subscriber channel
+// is buffered and Send writes synchronously while holding the lock, so a
+// sender either sees the subscriber in the map or does not, there is no
+// goroutine in flight that could send on a closed channel.
+//
+// The buffer holds a short burst because a cycle can emit two events back to
+// back (builddone then reload). With a single slot the second one was dropped
+// and the page never reloaded.
 func (s *sseHandler) Send(eventType string, data string) {
 	s.m.Lock()
 	defer s.m.Unlock()
-	for _, ch := range s.requests {
-		ch := ch
-		go func(ch chan event) {
-			ch <- event{
-				Type: eventType,
-				Data: data,
-			}
-		}(ch)
+	e := event{Type: eventType, Data: data}
+
+	// Remember the badge state so a subscriber that connects mid-build is told
+	// what is happening. Without this, the reload that repaints the page also
+	// disconnects the client, and a build finishing in that window leaves the
+	// new document with no idea a compile is still running.
+	switch eventType {
+	case "building", "builderror":
+		s.buildState = &e
+	case "builddone":
+		s.buildState = nil
 	}
+
+	for _, ch := range s.requests {
+		select {
+		case ch <- e:
+		default:
+			// Subscriber buffer full; skip. The subscriber will get the next
+			// event or the periodic ping.
+		}
+	}
+}
+
+// encodeEvent renders one SSE frame. A payload is emitted as one "data:" line
+// per source line, which is what the protocol requires and what EventSource
+// rejoins with newlines on the client. A raw multi-line payload would end the
+// frame at its first newline, so a compiler error reached the browser as its
+// header alone with the diagnostic stripped off.
+func encodeEvent(e event) string {
+	var b strings.Builder
+	b.WriteString("event: ")
+	b.WriteString(e.Type)
+	b.WriteString("\n")
+	for _, line := range strings.Split(e.Data, "\n") {
+		b.WriteString("data: ")
+		b.WriteString(strings.TrimRight(line, "\r"))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// Subscribers reports how many browser tabs are currently listening. A tab
+// left open from a previous session reconnects on its own, so a non-zero count
+// means somebody is already watching and the session does not need to open
+// another one.
+func (s *sseHandler) Subscribers() int {
+	s.m.Lock()
+	defer s.m.Unlock()
+	return len(s.requests)
 }
 
 func (s *sseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -155,11 +212,36 @@ func (s *sseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
+	// Tell the browser how fast to reconnect after the stream drops. Every
+	// rebuild restarts the app, and the default retry (seconds, browser-defined)
+	// leaves an open tab disconnected long enough that the session cannot tell
+	// it is there.
+	if _, err := io.WriteString(w, "retry: 500\n\n"); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.(http.Flusher).Flush()
+
 	id := atomic.AddInt64(&s.counter, 1)
 	s.m.Lock()
-	events := make(chan event)
+	events := make(chan event, 4)
 	s.requests[id] = events
+	pending := s.buildState
 	s.m.Unlock()
+
+	// Replay the current badge state before entering the loop, so a page that
+	// reloaded mid-compile picks the badge back up instead of looking finished
+	// while the old binary is still live. Written directly rather than queued:
+	// the keepalive timer is already armed, and the loop's select would pick
+	// between the two at random.
+	if pending != nil {
+		if _, err := io.WriteString(w, encodeEvent(*pending)); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.(http.Flusher).Flush()
+	}
+
 	defer func() {
 		s.m.Lock()
 		defer s.m.Unlock()
@@ -178,7 +260,7 @@ loop:
 			}
 			timer.Reset(time.Second * 5)
 		case e := <-events:
-			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.Type, e.Data); err != nil {
+			if _, err := io.WriteString(w, encodeEvent(e)); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -206,6 +288,17 @@ func (proxy *ProxyHelper) SendSSE(eventType, data string) {
 }
 
 // RoundTripper with retry and exponential backoff
+// delayForRetry returns the exponential-backoff delay for the given retry
+// index, capped at maxDelay when set. Exported as a method so tests assert
+// on the delay function directly.
+func (rt *roundTripper) delayForRetry(retries int) time.Duration {
+	delay := rt.initialDelay * time.Duration(math.Pow(rt.backoffExponent, float64(retries)))
+	if rt.maxDelay > 0 && delay > rt.maxDelay {
+		delay = rt.maxDelay
+	}
+	return delay
+}
+
 func (rt *roundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 	var bodyBytes []byte
 	if r.Body != nil && r.Body != http.NoBody {
@@ -229,7 +322,7 @@ func (rt *roundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 		}
 		resp, err = http.DefaultTransport.RoundTrip(req)
 		if err != nil {
-			delay := rt.initialDelay * time.Duration(math.Pow(rt.backoffExponent, float64(retries)))
+			delay := rt.delayForRetry(retries)
 			select {
 			case <-time.After(delay):
 			case <-r.Context().Done():
@@ -252,7 +345,7 @@ func (rt *roundTripper) setShouldSkipResponseModificationHeader(r *http.Request,
 
 // Modify response to inject script and handle encoding
 func (proxy *ProxyHelper) modifyResponse(r *http.Response) error {
-	// Disable caching for all dev proxy responses — same effect as DevTools "Disable cache".
+	// Disable caching for all dev proxy responses, same effect as DevTools "Disable cache".
 	r.Header.Set("Cache-Control", "no-store, must-revalidate")
 	r.Header.Del("ETag")
 	r.Header.Del("Last-Modified")

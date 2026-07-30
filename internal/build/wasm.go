@@ -53,6 +53,12 @@ type WasmHelper struct {
 	cache        *wasmCache
 	astLoader    *astx.Loader
 
+	// DevShaping controls compression level and wasm-opt pass for development builds.
+	DevShaping bool
+	// QuietSummary suppresses the aggregate "N up to date, M rebuilt" line so a
+	// caller that times the whole stage can print it once with the duration.
+	// Without it a hot-reload cycle prints the aggregate twice.
+	QuietSummary bool
 	// counts holds atomic build counters behind a pointer so WasmHelper
 	// stays copyable (avoids go vet warnings when passed by value).
 	counts *wasmBuildCounts
@@ -107,7 +113,7 @@ type WasmPage struct {
 	// struct type reachable from a Decode[T] call in this page's ClientSideState,
 	// deduplicated by identifier. These are extracted via go/types during
 	// scanning (while the loader's type info is live) and consumed later by
-	// writeWasmMain. Nil when the page makes no Decode[T] call — tree-shaking: no
+	// writeWasmMain. Nil when the page makes no Decode[T] call, tree-shaking: no
 	// Decode, no generated decoder, no runtime-parser cost.
 	JSONDecodeTypes []jsonReaderType
 	// JSONDecodeRoots holds the (Ident, GoType) of each top-level Decode[T] type
@@ -131,6 +137,26 @@ func NewWasmHelper(goos, goarch string) WasmHelper {
 		BinaryenVersion: binaryenVersion,
 		counts:          &wasmBuildCounts{},
 	}
+}
+
+// RebuiltCount returns the number of WASM pages that were actually compiled
+// (not served from cache) in the last GenerateAll call. Returns 0 when no
+// GenerateAll has completed or when the counts struct has been reset.
+func (h *WasmHelper) RebuiltCount() int32 {
+	if h.counts == nil {
+		return 0
+	}
+	return h.counts.built.Load()
+}
+
+// UpToDateCount returns the number of WASM pages served from cache in the last
+// GenerateAll call, so a caller printing its own aggregate reports the same
+// numbers GenerateAll counted rather than deriving them from a page total.
+func (h *WasmHelper) UpToDateCount() int32 {
+	if h.counts == nil {
+		return 0
+	}
+	return h.counts.upToDate.Load()
 }
 
 // DefaultWasmHelper creates a WasmHelper using the current runtime's OS and architecture.

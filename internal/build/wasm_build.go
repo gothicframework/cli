@@ -1,6 +1,7 @@
 package helpers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"text/template"
 
 	wasmruntime "github.com/gothicframework/core/wasm"
 	wasmexec "github.com/gothicframework/core/wasmexec"
@@ -21,18 +23,64 @@ import (
 // here run on the host (not inside WASM).
 
 // Template source paths inside the embedded FS (WasmTemplateFS). The CLI no
-// longer reads these from the user's project tree — they are an implementation
+// longer reads these from the user's project tree, they are an implementation
 // detail of the build pipeline and ship inside the binary.
 const (
 	tmplWasmPageMain     = EmbeddedTmplWasmPageMain
 	tmplTopicManagerMain = EmbeddedTmplTopicManagerMain
 )
 
-func (h *WasmHelper) GeneratePage(page WasmPage, outDir string, warnOnce *sync.Once) error {
+func (h *WasmHelper) GeneratePage(page WasmPage, outDir string, warnOnce *sync.Once, topicData topicCodegenData) error {
 	compressedExt := compressionExt(page.Compression)
+
+	topicSnippets, topicStructs, topicAliases, topicRefAliases := topicData.snippets, topicData.structs, topicData.aliases, topicData.refAliases
+	body, err := h.rewriteTopicCalls(page.FuncBody, topicStructs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wasm: rewrite topic calls %s: %v\n", page.SourceFile, err)
+		os.Exit(1)
+	}
+	// Rewrite Decode[T](resp) → _jsonDecode_<Ident>(resp). The runtime
+	// build has no Decode symbol, so this must run for every page that calls
+	// Decode[T].
+	if len(page.JSONDecodeRoots) > 0 {
+		rootIdents := make(map[string]bool, len(page.JSONDecodeRoots))
+		for _, r := range page.JSONDecodeRoots {
+			rootIdents[r.Ident] = true
+		}
+		body, err = h.rewriteDecodeCalls(body, rootIdents)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "wasm: rewrite decode calls %s: %v\n", page.SourceFile, err)
+			os.Exit(1)
+		}
+	}
+	// Rewrite Encode[T](v) → _jsonEncode_<Ident>(v).
+	if len(page.JSONEncodeRoots) > 0 {
+		rootIdents := make(map[string]bool, len(page.JSONEncodeRoots))
+		for _, r := range page.JSONEncodeRoots {
+			rootIdents[r.Ident] = true
+		}
+		body, err = h.rewriteEncodeCalls(body, rootIdents)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "wasm: rewrite encode calls %s: %v\n", page.SourceFile, err)
+			os.Exit(1)
+		}
+	}
+
+	// Render main.go to bytes before the cache lookup. The hash now covers the
+	// actual build input instead of the source _templ.go, so a markup-only edit
+	// (same ClientSideState → same rendered main.go) no longer triggers a rebuild.
+	mainData, err := h.buildWasmPageMainData(page.SourceFile, body, page.Imports, page.Helpers, topicSnippets, topicStructs, topicAliases, topicRefAliases, page.JSONDecodeTypes, page.JSONDecodeRoots, page.JSONEncodeTypes, page.JSONEncodeRoots, page.Multiplexed)
+	if err != nil {
+		return err
+	}
+	mainBytes, err := renderWasmPageMainTemplate(mainData)
+	if err != nil {
+		return err
+	}
+
 	var hash string
 	if h.cache != nil {
-		hash = h.pageInputHash(page)
+		hash = h.pageInputHash(page, mainBytes)
 		outPath := filepath.Join(outDir, page.OutputName+".wasm"+compressedExt)
 		if h.cache.upToDate(page.OutputName, hash) {
 			if _, err := os.Stat(outPath); err == nil {
@@ -72,40 +120,8 @@ func (h *WasmHelper) GeneratePage(page WasmPage, outDir string, warnOnce *sync.O
 	}
 
 	mainPath := filepath.Join(genDir, "main.go")
-	topicSnippets, topicStructs, topicAliases, topicRefAliases := h.collectTopicSnippets()
-	body, err := h.rewriteTopicCalls(page.FuncBody, topicStructs)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "wasm: rewrite topic calls %s: %v\n", page.SourceFile, err)
-		os.Exit(1)
-	}
-	// Rewrite Decode[T](resp) → _jsonDecode_<Ident>(resp). The runtime
-	// build has no Decode symbol, so this must run for every page that calls
-	// Decode[T].
-	if len(page.JSONDecodeRoots) > 0 {
-		rootIdents := make(map[string]bool, len(page.JSONDecodeRoots))
-		for _, r := range page.JSONDecodeRoots {
-			rootIdents[r.Ident] = true
-		}
-		body, err = h.rewriteDecodeCalls(body, rootIdents)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "wasm: rewrite decode calls %s: %v\n", page.SourceFile, err)
-			os.Exit(1)
-		}
-	}
-	// Rewrite Encode[T](v) → _jsonEncode_<Ident>(v).
-	if len(page.JSONEncodeRoots) > 0 {
-		rootIdents := make(map[string]bool, len(page.JSONEncodeRoots))
-		for _, r := range page.JSONEncodeRoots {
-			rootIdents[r.Ident] = true
-		}
-		body, err = h.rewriteEncodeCalls(body, rootIdents)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "wasm: rewrite encode calls %s: %v\n", page.SourceFile, err)
-			os.Exit(1)
-		}
-	}
-	if err := h.writeWasmMain(page.SourceFile, body, page.Imports, page.Helpers, topicSnippets, topicStructs, topicAliases, topicRefAliases, page.JSONDecodeTypes, page.JSONDecodeRoots, page.JSONEncodeTypes, page.JSONEncodeRoots, page.Multiplexed, mainPath); err != nil {
-		return err
+	if err := os.WriteFile(mainPath, mainBytes, 0644); err != nil {
+		return fmt.Errorf("wasm: write main.go: %w", err)
 	}
 
 	if err := os.MkdirAll(outDir, 0755); err != nil {
@@ -133,29 +149,35 @@ func (h *WasmHelper) GeneratePage(page WasmPage, outDir string, warnOnce *sync.O
 
 	wasmSize, _ := h.fileSize(absOutFile)
 
-	wasmOpt := "wasm-opt"
-	if _, err := exec.LookPath(wasmOpt); err != nil {
-		wasmOpt = ""
-		if managed := h.BinaryenBinary(); managed != "" {
-			if _, err := os.Stat(managed); err == nil {
-				wasmOpt = managed
+	// In dev, skip the explicit wasm-opt -Oz --strip-debug pass: TinyGo already
+	// invokes Binaryen at -opt=z, so the second pass buys ~3% for ~100ms.
+	// Skipping must not emit the "wasm-opt not found" warning, that warning
+	// means something different and firing it here would be a lie.
+	if !h.DevShaping {
+		wasmOpt := "wasm-opt"
+		if _, err := exec.LookPath(wasmOpt); err != nil {
+			wasmOpt = ""
+			if managed := h.BinaryenBinary(); managed != "" {
+				if _, err := os.Stat(managed); err == nil {
+					wasmOpt = managed
+				}
 			}
 		}
-	}
 
-	if wasmOpt != "" {
-		tmp := absOutFile + ".opt"
-		opt := exec.Command(wasmOpt, "-Oz", "--strip-debug", "-o", tmp, absOutFile)
-		if err := opt.Run(); err == nil {
-			os.Rename(tmp, absOutFile)
+		if wasmOpt != "" {
+			tmp := absOutFile + ".opt"
+			opt := exec.Command(wasmOpt, "-Oz", "--strip-debug", "-o", tmp, absOutFile)
+			if err := opt.Run(); err == nil {
+				os.Rename(tmp, absOutFile)
+			} else {
+				os.Remove(tmp)
+			}
 		} else {
-			os.Remove(tmp)
-		}
-	} else {
-		if warnOnce != nil {
-			warnOnce.Do(func() {
-				wasmWarnf("wasm-opt not found; skipping manual optimization pass. Install Binaryen for smaller binaries.")
-			})
+			if warnOnce != nil {
+				warnOnce.Do(func() {
+					wasmWarnf("wasm-opt not found; skipping manual optimization pass. Install Binaryen for smaller binaries.")
+				})
+			}
 		}
 	}
 
@@ -180,11 +202,11 @@ func (h *WasmHelper) GeneratePage(page WasmPage, outDir string, warnOnce *sync.O
 // ("./<genDir>/"). The runtime files use `//go:build js && wasm`, so both
 // TinyGo's -target=wasm and standard Go's GOOS=js GOARCH=wasm satisfy them.
 // tinygoWasmFlags and goWasmFlags/goWasmEnv are the stable, build-identifying
-// arguments for each compiler — the flags that determine the produced WASM binary,
+// arguments for each compiler, the flags that determine the produced WASM binary,
 // excluding the per-build -o/pkg operands. They are the SINGLE source of truth: the
 // build commands below are assembled from them, and buildRecipeFingerprint folds
-// them into the WASM cache hash (see wasm_cache.go). This way a recipe change — e.g.
-// the -gc conservative switch — can never silently reuse a stale cached binary.
+// them into the WASM cache hash (see wasm_cache.go). This way a recipe change, e.g.
+// the -gc conservative switch, can never silently reuse a stale cached binary.
 var (
 	tinygoWasmFlags = []string{"build", "-no-debug", "-opt=z", "-target", "wasm", "-gc", "precise"}
 	goWasmFlags     = []string{"build", "-ldflags=-s -w", "-trimpath"}
@@ -370,13 +392,24 @@ func (h *WasmHelper) GenerateAll(pages []WasmPage, outDir string) error {
 
 	// Topics no longer compile to a per-topic MANAGER WASM. The
 	// always-loaded full-Go static core (served from the framework embed via the
-	// /_gothic/ route) is now the single generic topic hub — it store-and-forwards
+	// /_gothic/ route) is now the single generic topic hub, it store-and-forwards
 	// every topic's per-field
 	// binary frames opaquely and replays state on join. Consumers self-register
 	// their key + field names with the core at runtime (RegisterTopicWithCore in
 	// the generated page main), so there is nothing to build here. The
 	// GenerateTopicManagers / buildTopicManager machinery is retained (and still
 	// directly unit-tested) but is no longer part of the build pipeline.
+
+	// Compute topic codegen data once per build. This reads src/topics/*.go,
+	// writes topic_gen.go, and normalizes user declarations, all of which must
+	// happen before any per-page goroutine runs, not inside one.
+	snippets, structs, aliases, refAliases := h.collectTopicSnippets()
+	topicData := topicCodegenData{
+		snippets:   snippets,
+		structs:    structs,
+		aliases:    aliases,
+		refAliases: refAliases,
+	}
 
 	g, gctx := errgroup.WithContext(context.Background())
 	sem := semaphore.NewWeighted(int64(runtime.NumCPU()))
@@ -387,7 +420,7 @@ func (h *WasmHelper) GenerateAll(pages []WasmPage, outDir string) error {
 				return err
 			}
 			defer sem.Release(1)
-			return h.GeneratePage(page, outDir, warnOnce)
+			return h.GeneratePage(page, outDir, warnOnce, topicData)
 		})
 	}
 	if err := g.Wait(); err != nil {
@@ -396,7 +429,7 @@ func (h *WasmHelper) GenerateAll(pages []WasmPage, outDir string) error {
 
 	up := h.counts.upToDate.Load()
 	built := h.counts.built.Load()
-	if up > 0 || built > 0 {
+	if !h.QuietSummary && (up > 0 || built > 0) {
 		switch {
 		case built > 0 && up > 0:
 			wasmLogf("%s up to date, %s rebuilt", wasmNum(up), wasmNum(built))
@@ -408,7 +441,7 @@ func (h *WasmHelper) GenerateAll(pages []WasmPage, outDir string) error {
 	}
 
 	h.cache.save()
-	// TinyGo's wasm_exec.js is no longer copied into public/ — it is served from
+	// TinyGo's wasm_exec.js is no longer copied into public/, it is served from
 	// the framework embed via /_gothic/wasm_exec.js (see pkg/helpers/runtimeassets).
 	// The standard-Go wasm_exec_go.js, however, is version-tied to the USER's Go
 	// toolchain, so it is still copied from their GOROOT below.
@@ -472,7 +505,7 @@ func (h *WasmHelper) CopyWasmExec(destDir string) error {
 // because the full-Go static core is now the generic topic hub (see the note in
 // GenerateAll). The method and buildTopicManager are kept so the existing
 // unit tests that drive them directly still compile and pass, and so a manager
-// binary can be produced on demand if ever needed — but a normal build emits no
+// binary can be produced on demand if ever needed, but a normal build emits no
 // topic-<key>.wasm.
 func (h *WasmHelper) GenerateTopicManagers(outDir string, warnOnce *sync.Once) error {
 	snippets, structs, aliases, refAliases := h.collectTopicSnippets()
@@ -625,20 +658,53 @@ func (h *WasmHelper) buildTopicManager(s structInfo, snippets []string, allStruc
 	return nil
 }
 
-func (h *WasmHelper) writeWasmMain(src, body string, stdImports []string, helpers []string, topicSnippets []string, topicStructs []structInfo, aliases map[string]string, refAliases map[string]typeRef, jsonReaders []jsonReaderType, jsonRoots []jsonRootRef, jsonWriters []jsonReaderType, jsonEncodeRoots []jsonRootRef, multiplexed bool, dest string) error {
+// renderWasmPageMainTemplate renders the page main template to bytes.
+func renderWasmPageMainTemplate(data WasmPageMainData) ([]byte, error) {
+	tmplBytes, err := WasmTemplateFS.ReadFile(tmplWasmPageMain)
+	if err != nil {
+		return nil, err
+	}
+	tmpl, err := template.New(tmplWasmPageMain).Parse(string(tmplBytes))
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// buildWasmPageMainData constructs the template data for the WASM page main template
+// from the raw build inputs. Extracted from writeWasmMain so GeneratePage can render
+// to bytes before the cache lookup.
+func (h *WasmHelper) buildWasmPageMainData(
+	src, body string,
+	stdImports []string,
+	helpers []string,
+	topicSnippets []string,
+	topicStructs []structInfo,
+	aliases map[string]string,
+	refAliases map[string]typeRef,
+	jsonReaders []jsonReaderType,
+	jsonRoots []jsonRootRef,
+	jsonWriters []jsonReaderType,
+	jsonEncodeRoots []jsonRootRef,
+	multiplexed bool,
+) (WasmPageMainData, error) {
 	codecs, err := h.buildCodecData(topicStructs, aliases, refAliases)
 	if err != nil {
-		return fmt.Errorf("wasm: codec: %w", err)
+		return WasmPageMainData{}, fmt.Errorf("wasm: codec: %w", err)
 	}
 	wasmFuncs, err := h.buildWasmTopicFuncData(topicStructs, aliases, refAliases)
 	if err != nil {
-		return fmt.Errorf("wasm: topic func data: %w", err)
+		return WasmPageMainData{}, fmt.Errorf("wasm: topic func data: %w", err)
 	}
 	// Reflection-free Decode[T] readers + entry points.
 	jsonReaderData, jsonDecoderData := h.buildJSONDecodeData(jsonReaders, jsonRoots)
 	// Reflection-free Encode[T] writers + entry points. When any writer
 	// is emitted, the shared append/escape helpers (which use strconv) are pulled
-	// in — so "strconv" must be imported.
+	// in, so "strconv" must be imported.
 	jsonWriterData, jsonEncoderData := h.buildJSONEncodeData(jsonWriters, jsonEncodeRoots)
 	jsonEncodeHelpers := ""
 	if len(jsonWriterData) > 0 {
@@ -673,7 +739,7 @@ func (h *WasmHelper) writeWasmMain(src, body string, stdImports []string, helper
 	// keep-alive (`select { case <-GothicHaltChan(): return }`, instance
 	// teardown) at the end of main, so users no longer need to write a keep-alive
 	// themselves. If a user still has the old bare `select {}` boilerplate, we
-	// remove it here so it can't sit before — and dead-code-shadow — the
+	// remove it here so it can't sit before, and dead-code-shadow, the
 	// template's haltable copy, which stays the canonical keep-alive.
 	trimmed := strings.TrimRight(body, " \t\r\n")
 	if strings.HasSuffix(trimmed, "select{}") {
@@ -688,7 +754,7 @@ func (h *WasmHelper) writeWasmMain(src, body string, stdImports []string, helper
 		indented.WriteString("\t" + line + "\n")
 	}
 
-	return h.Template.UpdateFromTemplateFS(WasmTemplateFS, tmplWasmPageMain, dest, WasmPageMainData{
+	return WasmPageMainData{
 		SourceFile:        src,
 		StdImports:        stdImports,
 		Codecs:            codecs,
@@ -704,5 +770,17 @@ func (h *WasmHelper) writeWasmMain(src, body string, stdImports []string, helper
 		JSONWriters:       jsonWriterData,
 		JSONEncoders:      jsonEncoderData,
 		JSONEncodeHelpers: jsonEncodeHelpers,
-	})
+	}, nil
+}
+
+func (h *WasmHelper) writeWasmMain(src, body string, stdImports []string, helpers []string, topicSnippets []string, topicStructs []structInfo, aliases map[string]string, refAliases map[string]typeRef, jsonReaders []jsonReaderType, jsonRoots []jsonRootRef, jsonWriters []jsonReaderType, jsonEncodeRoots []jsonRootRef, multiplexed bool, dest string) error {
+	data, err := h.buildWasmPageMainData(src, body, stdImports, helpers, topicSnippets, topicStructs, aliases, refAliases, jsonReaders, jsonRoots, jsonWriters, jsonEncodeRoots, multiplexed)
+	if err != nil {
+		return err
+	}
+	rendered, err := renderWasmPageMainTemplate(data)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dest, rendered, 0644)
 }

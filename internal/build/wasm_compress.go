@@ -37,14 +37,22 @@ func (h *WasmHelper) compressWasmWith(src, dst string, c WasmCompression) error 
 	}
 	defer f.Close()
 	if c == WasmCompressionBrotli {
-		w := brotli.NewWriterLevel(f, brotli.BestCompression)
+		level := brotli.BestCompression
+		if h.DevShaping {
+			level = 5
+		}
+		w := brotli.NewWriterLevel(f, level)
 		if _, err := w.Write(in); err != nil {
 			w.Close()
 			return err
 		}
 		return w.Close()
 	}
-	w, err := gzip.NewWriterLevel(f, gzip.BestCompression)
+	level := gzip.BestCompression
+	if h.DevShaping {
+		level = gzip.DefaultCompression
+	}
+	w, err := gzip.NewWriterLevel(f, level)
 	if err != nil {
 		return err
 	}

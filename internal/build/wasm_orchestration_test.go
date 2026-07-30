@@ -1,12 +1,13 @@
 package helpers
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/gothicframework/cli/v3/internal/build/astx"
 )
 
 // writeProjectFile writes content to a file under the current working
@@ -127,16 +128,6 @@ func TestCountTopicManagers(t *testing.T) {
 	}
 }
 
-func TestFeedTopicFiles(t *testing.T) {
-	setupTopicProject(t)
-	h := DefaultWasmHelper()
-	var buf bytes.Buffer
-	h.feedTopicFiles(&buf)
-	if buf.Len() == 0 {
-		t.Error("expected feedTopicFiles to hash topic source files")
-	}
-}
-
 func TestTopicManagerInputHash_ChangesWithCompression(t *testing.T) {
 	setupTopicProject(t)
 	h := DefaultWasmHelper()
@@ -224,7 +215,7 @@ var Widget = routes.RouteConfig{
 	},
 }
 `)
-	// A *_templ.go file with no ClientSideState — must be skipped.
+	// A *_templ.go file with no ClientSideState, must be skipped.
 	writeProjectFile(t, "src/pages/plain_templ.go", `package pages
 
 var Plain = 1
@@ -281,6 +272,12 @@ func TestScanPages_FindsClientSideStatePages(t *testing.T) {
 func TestScanPages_CollectsLocalPackageDirs(t *testing.T) {
 	withTempCwd(t)
 	writeProjectFile(t, "go.mod", "module example.com/app\n\ngo 1.21\n")
+
+	// This test exercises the NeedDeps-free code path: NewLoader no longer
+	// sets NeedDeps, so pagePkg.Imports[path] is a stub with only ID.
+	// collectLocalPackageDirs must resolve the cross-package helper
+	// (internal/calc) through the loader's byPath index instead. If ByPath
+	// misses or returns a stub, the test fails.
 	writeProjectFile(t, "helpers/routes/routes.go", `package routes
 
 type RouteConfig struct {
@@ -323,6 +320,18 @@ var Page = routes.RouteConfig{
 	}
 	if !found {
 		t.Errorf("expected internal/calc in LocalPackageDirs, got %v", pages[0].LocalPackageDirs)
+	}
+	// Verify the loader resolves packages through ByPath without NeedDeps.
+	loader, err := astx.NewLoader(".")
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	calcPkg := loader.ByPath("example.com/app/internal/calc")
+	if calcPkg == nil {
+		t.Fatal("ByPath: expected non-nil for example.com/app/internal/calc")
+	}
+	if len(calcPkg.GoFiles) == 0 {
+		t.Fatal("ByPath: calc package GoFiles is empty, NeedDeps was required to populate it")
 	}
 }
 
@@ -467,7 +476,7 @@ func TestScanPages_EmptyDirsReturnNothing(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// wasm_build.go — pure helpers testable without the toolchain
+// wasm_build.go, pure helpers testable without the toolchain
 // ---------------------------------------------------------------------------
 
 func TestCompilerLabel(t *testing.T) {
@@ -646,7 +655,7 @@ func TestRewriteAutoKeys_Wrapper(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// wasm_codec_types.go — typeRef() marker methods (0% before)
+// wasm_codec_types.go, typeRef() marker methods (0% before)
 // ---------------------------------------------------------------------------
 
 func TestTypeRefMarkerMethods(t *testing.T) {
@@ -667,7 +676,7 @@ func TestTypeRefMarkerMethods(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// wasm_templates.go — CleanupLegacyTemplates
+// wasm_templates.go, CleanupLegacyTemplates
 // ---------------------------------------------------------------------------
 
 func TestCleanupLegacyTemplates_RemovesStaleCopies(t *testing.T) {

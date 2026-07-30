@@ -58,13 +58,17 @@ func (c *wasmCache) save() {
 	_ = os.WriteFile(wasmCachePath, data, 0644)
 }
 
-// pageInputHash hashes the source file, all topic files, and the page template.
-// Any change in these inputs produces a different hash and triggers a rebuild.
-func (h *WasmHelper) pageInputHash(page WasmPage) string {
+// pageInputHash hashes the rendered main.go, the tree-shaken helpers, local
+// package files, the embedded template and runtime, the build recipe, and the
+// per-page shaper/compiler/compressor/multiplexed flags. Any change in these
+// inputs produces a different hash and triggers a rebuild.
+func (h *WasmHelper) pageInputHash(page WasmPage, renderedMain []byte) string {
 	hh := sha256.New()
-	if data, err := os.ReadFile(page.SourceFile); err == nil {
-		hh.Write(data)
-	}
+	// Hash the rendered main.go instead of the source _templ.go, so markup-only
+	// edits (same ClientSideState → same rendered main.go) no longer trigger a
+	// TinyGo recompile. Topic snippets are baked into the rendered main.go by
+	// writeWasmMain, so topic changes naturally invalidate the cache.
+	hh.Write(renderedMain)
 	// Per-symbol hashing for the page's own package. Instead of
 	// hashing every hand-written .go file in the page's directory, hash only
 	// the formatted source of the AST decls the page's ClientSideState body
@@ -83,7 +87,7 @@ func (h *WasmHelper) pageInputHash(page WasmPage) string {
 	h.feedEmbeddedTemplate(hh, tmplWasmPageMain)
 	h.feedRuntimeFS(hh)
 	// Fold the compiler build recipe (flags) into the hash so a flag-only change —
-	// e.g. the -gc conservative switch — invalidates the cache even when no runtime
+	// e.g. the -gc conservative switch, invalidates the cache even when no runtime
 	// .go source changed.
 	io.WriteString(hh, buildRecipeFingerprint())
 	hh.Write([]byte{byte(page.Compression)})
@@ -91,6 +95,13 @@ func (h *WasmHelper) pageInputHash(page WasmPage) string {
 	// Fold Multiplexed into the hash so toggling it regenerates main()
 	// even if nothing else in the source changed.
 	if page.Multiplexed {
+		hh.Write([]byte{1})
+	} else {
+		hh.Write([]byte{0})
+	}
+	// Fold the shaping mode into the hash so a dev-shaped artifact never
+	// reports up to date to a later production build.
+	if h.DevShaping {
 		hh.Write([]byte{1})
 	} else {
 		hh.Write([]byte{0})
@@ -162,29 +173,6 @@ func (h *WasmHelper) topicManagerInputHash(s structInfo) string {
 	hh.Write([]byte{byte(s.Compression)})
 	hh.Write([]byte{byte(s.Compiler)})
 	return hex.EncodeToString(hh.Sum(nil))
-}
-
-func (h *WasmHelper) feedTopicFiles(hh io.Writer) {
-	sourceDir, genFile, ok := resolveTopicSourceDir()
-	if !ok {
-		return
-	}
-	entries, err := os.ReadDir(sourceDir)
-	if err != nil {
-		return
-	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") && e.Name() != genFile {
-			names = append(names, e.Name())
-		}
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if data, err := os.ReadFile(filepath.Join(sourceDir, name)); err == nil {
-			hh.Write(data)
-		}
-	}
 }
 
 // feedRuntimeFS hashes the embedded WASM runtime sources so any change to the

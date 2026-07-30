@@ -34,15 +34,18 @@ func TestGeneratePage_CacheHitSkipsBuild(t *testing.T) {
 	}
 
 	// Pre-create the output file and seed the cache with the matching hash so
-	// the up-to-date branch fires.
+	// the up-to-date branch fires.  The hash must be computed over the same
+	// rendered bytes that GeneratePage will produce.
 	outFile := filepath.Join(outDir, page.OutputName+".wasm.gz")
 	if err := os.WriteFile(outFile, []byte("prebuilt"), 0644); err != nil {
 		t.Fatalf("write out file: %v", err)
 	}
-	hash := h.pageInputHash(page)
+	// Render the page's main.go the same way GeneratePage will, so the hash matches.
+	rendered := h.renderWasmMainBytesForTest(page, "")
+	hash := h.pageInputHash(page, rendered)
 	h.cache.update(page.OutputName, hash)
 
-	if err := h.GeneratePage(page, outDir, &sync.Once{}); err != nil {
+	if err := h.GeneratePage(page, outDir, &sync.Once{}, topicCodegenData{}); err != nil {
 		t.Fatalf("GeneratePage cache-hit: %v", err)
 	}
 	// The prebuilt file must still be there (not rebuilt).
@@ -53,7 +56,7 @@ func TestGeneratePage_CacheHitSkipsBuild(t *testing.T) {
 
 // TestGeneratePage_SourceChangeInvalidatesCache proves the dangerous direction:
 // A change to the compiler build recipe (flags) must invalidate the per-page cache
-// even when nothing in the source or runtime .go files changed — otherwise a
+// even when nothing in the source or runtime .go files changed, otherwise a
 // framework release that only tweaks build flags (as the -gc conservative fix did)
 // would keep serving a stale WASM. This guards the buildRecipeFingerprint wiring.
 func TestGeneratePage_BuildRecipeChangeInvalidatesCache(t *testing.T) {
@@ -65,8 +68,9 @@ func TestGeneratePage_BuildRecipeChangeInvalidatesCache(t *testing.T) {
 	h := DefaultWasmHelper()
 	h.cache = loadWasmCache()
 	page := WasmPage{SourceFile: srcPath, OutputName: "counter", Compression: WasmCompressionGzip}
+	rendered := []byte("package main\nfunc main() {}\n")
 
-	before := h.pageInputHash(page)
+	before := h.pageInputHash(page, rendered)
 
 	// Simulate a framework release changing the TinyGo recipe. Restore afterwards so
 	// other tests see the real flags.
@@ -74,19 +78,18 @@ func TestGeneratePage_BuildRecipeChangeInvalidatesCache(t *testing.T) {
 	tinygoWasmFlags = append(append([]string{}, saved...), "-panic=trap")
 	defer func() { tinygoWasmFlags = saved }()
 
-	after := h.pageInputHash(page)
+	after := h.pageInputHash(page, rendered)
 	if after == before {
 		t.Fatal("expected pageInputHash to change after the build recipe changed")
 	}
 }
 
-// when the page's source-file content changes, pageInputHash must differ from
-// the cached hash so the build is NOT skipped. A false cache hit here would ship
-// a stale WASM that ignores the user's edits.
-func TestGeneratePage_SourceChangeInvalidatesCache(t *testing.T) {
+// When the rendered main.go content changes (e.g. a FuncBody edit), pageInputHash
+// must differ from the cached hash so the build is NOT skipped.
+func TestGeneratePage_RenderedBodyChangeInvalidatesCache(t *testing.T) {
 	dir := withTempCwd(t)
 	srcPath := filepath.Join(dir, "page.go")
-	if err := os.WriteFile(srcPath, []byte("package x\n\nvar Counter = 1\n"), 0644); err != nil {
+	if err := os.WriteFile(srcPath, []byte("package x\n"), 0644); err != nil {
 		t.Fatalf("write src: %v", err)
 	}
 
@@ -97,28 +100,26 @@ func TestGeneratePage_SourceChangeInvalidatesCache(t *testing.T) {
 		SourceFile:  srcPath,
 		OutputName:  "counter",
 		Compression: WasmCompressionGzip,
+		FuncBody:    "x := 1",
 	}
 
-	// Seed the cache with the hash of the ORIGINAL source.
-	originalHash := h.pageInputHash(page)
+	// Seed the cache with the hash of the ORIGINAL rendered body.
+	originalRendered := h.renderWasmMainBytesForTest(page, page.FuncBody)
+	originalHash := h.pageInputHash(page, originalRendered)
 	h.cache.update(page.OutputName, originalHash)
 	if !h.cache.upToDate(page.OutputName, originalHash) {
 		t.Fatalf("sanity: original hash should be up-to-date")
 	}
 
-	// Rewrite the source with a meaningful change.
-	if err := os.WriteFile(srcPath, []byte("package x\n\nvar Counter = 999\n"), 0644); err != nil {
-		t.Fatalf("rewrite src: %v", err)
-	}
-
-	newHash := h.pageInputHash(page)
+	// Change the FuncBody (simulating a ClientSideState edit).
+	page.FuncBody = "x := 999"
+	newRendered := h.renderWasmMainBytesForTest(page, page.FuncBody)
+	newHash := h.pageInputHash(page, newRendered)
 	if newHash == originalHash {
-		t.Fatal("expected pageInputHash to change after source content change")
+		t.Fatal("expected pageInputHash to change after FuncBody change")
 	}
-	// The cache entry (still the original hash) must now be considered stale, so
-	// the build would proceed rather than short-circuit.
 	if h.cache.upToDate(page.OutputName, newHash) {
-		t.Error("expected cache to be stale after source change → build must not be skipped")
+		t.Error("expected cache to be stale after FuncBody change → build must not be skipped")
 	}
 }
 

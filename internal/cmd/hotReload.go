@@ -63,6 +63,9 @@ type HotReloadCommand struct {
 	// of the session, where it is the only thing describing the work ahead.
 	wasmInventoryShown bool
 	verbose            bool
+	// wasmMu serialises the WASM stage inside the background goroutine so a
+	// burst of saves queues GenerateAll calls instead of racing them.
+	wasmMu sync.Mutex
 
 	// Injectable seams for tests. Defaults set in newHotReloadCommandCli are
 	// exactly equivalent to the previous inline behavior, so production paths
@@ -70,6 +73,12 @@ type HotReloadCommand struct {
 	openBrowserFn func(url string) error      // default: defaultOpenBrowser
 	sleeper       func(d time.Duration)       // default: time.Sleep
 	proxyRunner   func(target *url.URL) error // default: cli.Proxy.RunProxy("localhost", 3000, target)
+	wasmStage     func() (int, error)         // default: buildWasmAll + RebuiltCount
+	sseSend       func(eventType, data string) // default: command.cli.Proxy.Sse.Send
+	// browserProbeBudget is how long to wait for an already-open tab to
+	// reconnect before opening a new one. Unset takes the default; the hermetic
+	// tests set a nanosecond so the probe resolves at once.
+	browserProbeBudget time.Duration
 }
 
 func newHotReloadCommandCli(cli *gothic_cli.GothicCli) HotReloadCommand {
@@ -122,6 +131,15 @@ func (command *HotReloadCommand) HotReload() error {
 			return command.cli.Proxy.RunProxy("localhost", 3000, target)
 		}
 	}
+	if command.wasmStage == nil {
+		command.wasmStage = command.buildWasmAll
+	}
+	if command.sseSend == nil {
+		command.sseSend = command.cli.Proxy.Sse.Send
+	}
+	if command.browserProbeBudget == 0 {
+		command.browserProbeBudget = defaultBrowserProbeBudget
+	}
 	godotenv.Load()
 	// Load config to pick up binary overrides if present
 	command.cli.GetConfig()
@@ -129,22 +147,21 @@ func (command *HotReloadCommand) HotReload() error {
 	if _, err := command.cli.Tailwind.EnsureBinary(); err != nil {
 		return fmt.Errorf("error resolving tailwind binary: %w", err)
 	}
-	// Ensure TinyGo is installed before any goroutines start — avoids a
+	// Ensure TinyGo is installed before any goroutines start, avoids a
 	// race between the download and the first rebuild() call.
 	if err := command.cli.Wasm.EnsureBinary(); err != nil {
 		return fmt.Errorf("error resolving tinygo binary: %w", err)
 	}
-	port := os.Getenv("HTTP_LISTEN_ADDR")
-	if port == "" {
-		port = ":60714"
-	}
-	targetURL, err := url.Parse("http://localhost" + port)
+	listenAddr := resolveListenAddr()
+	targetURL, err := listenAddrToURL(listenAddr)
 	if err != nil {
-		return fmt.Errorf("invalid target URL: %w", err)
+		return fmt.Errorf("invalid target URL from %q: %w", listenAddr, err)
 	}
 	go command.watchTailwindChanges()
-	// Wait for tailwind process to render css for the first time
-	command.sleeper(4 * time.Second)
+	// Wait for the first CSS output to appear instead of a fixed sleep, so
+	// the browser has styles on the first navigation. The sleeper-based poll
+	// keeps the 4s budget but returns as soon as the file is ready.
+	command.waitForStyleSheet()
 	go command.watchForChanges()
 
 	proxyErrCh := make(chan error, 1)
@@ -153,7 +170,12 @@ func (command *HotReloadCommand) HotReload() error {
 	}()
 
 	output.PrintRaw(banner())
-	command.openBrowserFn("http://127.0.0.1:3000")
+	// Open a tab only when nobody is already watching. A tab left open from a
+	// previous session reconnects to the reload stream on its own, so opening
+	// another one just piles up duplicates across restarts.
+	if !command.browserAlreadyOpen(command.browserProbeBudget) {
+		command.openBrowserFn("http://127.0.0.1:3000")
+	}
 
 	select {
 	case err := <-proxyErrCh:
@@ -167,6 +189,28 @@ func (command *HotReloadCommand) HotReload() error {
 		output.Println("Shutting down...")
 		command.awaitChildren(5 * time.Second)
 		return nil
+	}
+}
+
+// defaultBrowserProbeBudget covers the reload stream's own retry interval plus
+// the connect, so a tab left over from the previous session has time to come
+// back before the session decides nobody is watching.
+const defaultBrowserProbeBudget = 1500 * time.Millisecond
+
+// browserAlreadyOpen reports whether a tab is already listening to the reload
+// stream, polling until one shows up or the budget expires. The stream sends a
+// short retry interval, so a tab left over from the previous session reconnects
+// well inside this window.
+func (command *HotReloadCommand) browserAlreadyOpen(budget time.Duration) bool {
+	deadline := time.Now().Add(budget)
+	for {
+		if command.cli.Proxy.Sse.Subscribers() > 0 {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -207,14 +251,13 @@ func (command *HotReloadCommand) isExcludedDir(path string) bool {
 }
 
 func (command *HotReloadCommand) watchForChanges() {
-	command.rebuild()
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		// Returning is mandatory: every watcher call below would deref nil.
 		output.Errorln("cannot watch for changes, rebuilds are off: %v", err)
 		if strings.Contains(err.Error(), "too many open files") {
 			// A running editor can exhaust the per-user inotify instance limit on its own.
-			output.Errorln("the inotify instance limit is exhausted — raise fs.inotify.max_user_instances or close other watchers")
+			output.Errorln("the inotify instance limit is exhausted, raise fs.inotify.max_user_instances or close other watchers")
 		}
 		return
 	}
@@ -223,7 +266,7 @@ func (command *HotReloadCommand) watchForChanges() {
 	if err := watcher.Add("."); err != nil {
 		output.Errorln("cannot watch the project root: %v", err)
 	}
-	err = filepath.Walk("src", func(path string, info os.FileInfo, err error) error {
+	walkErr := filepath.Walk("src", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -235,8 +278,13 @@ func (command *HotReloadCommand) watchForChanges() {
 		}
 		return nil
 	})
-	if err != nil {
-		output.Errorln("cannot walk the project directories: %v", err)
+	// Register the watcher before the first build: saves during the build
+	// arm a rebuild instead of being silently dropped.
+	command.rebuild()
+	if walkErr != nil {
+		output.Errorln("cannot walk the project directories: %v", walkErr)
+		// The first rebuild may have created files the walk expected; retry
+		// once in case the error was a temporary directory-not-found.
 		command.rebuild()
 	}
 
@@ -316,8 +364,8 @@ func (command *HotReloadCommand) processCtx() context.Context {
 const maxTailwindRestarts = 5
 
 // watchTailwindChanges supervises the Tailwind watcher for the whole session.
-// The watcher is a long-lived Node process that can die on its own — it has hit
-// the V8 heap limit under heavy rebuild churn — and without a restart the CSS
+// The watcher is a long-lived Node process that can die on its own, it has hit
+// the V8 heap limit under heavy rebuild churn, and without a restart the CSS
 // silently stops updating for the rest of the session.
 func (command *HotReloadCommand) watchTailwindChanges() {
 	ctx := command.processCtx()
@@ -346,11 +394,11 @@ func (command *HotReloadCommand) watchTailwindChanges() {
 			cause = waitErr.Error()
 		}
 		if restarts >= maxTailwindRestarts {
-			output.Errorln("the Tailwind watcher died %d times (%s), giving up — CSS will not rebuild",
+			output.Errorln("the Tailwind watcher died %d times (%s), giving up, CSS will not rebuild",
 				restarts+1, cause)
 			return
 		}
-		output.Errorln("the Tailwind watcher died (%s) — restarting it", cause)
+		output.Errorln("the Tailwind watcher died (%s), restarting it", cause)
 		command.sleepFor(time.Second)
 	}
 }
@@ -362,6 +410,21 @@ func (command *HotReloadCommand) sleepFor(d time.Duration) {
 		return
 	}
 	time.Sleep(d)
+}
+
+// waitForStyleSheet polls for Tailwind's CSS output to appear, with a 4s
+// budget (40 checks x 100ms sleep). The count-based budget means a stubbed
+// sleeper (no-op in tests) completes all 40 iterations instantly rather than
+// burning wall-clock time. Returns as soon as the file is ready.
+func (command *HotReloadCommand) waitForStyleSheet() {
+	stylePath := "public/styles.css"
+	for i := 0; i < 40; i++ {
+		info, err := os.Stat(stylePath)
+		if err == nil && info.Size() > 0 {
+			return
+		}
+		command.sleepFor(100 * time.Millisecond)
+	}
 }
 
 // scheduleRebuild coalesces rapid fsnotify events (e.g. WRITE+CHMOD from a
@@ -408,37 +471,60 @@ func (command *HotReloadCommand) rebuild() {
 	defer command.mutex.Unlock()
 
 	start := time.Now()
+	// Resolve the sseSend seam to its default when rebuild() is called without
+	// going through HotReload (e.g. in unit tests that don't set up the Proxy).
+	if command.sseSend == nil {
+		command.sseSend = command.cli.Proxy.Sse.Send
+	}
 
 	// Name the file that caused this cycle before the slow work starts, so the
 	// wait between the save and the first build result is never unexplained.
 	if trigger := command.takeTrigger(); trigger != "" {
 		output.Println("%s %s", output.Tag("Rebuilding"), output.Link(displayPath(trigger)))
+		command.sseSend("building", displayPath(trigger))
 	}
 
 	command.phase("Build routes...")
 	config, err := command.cli.GetConfig()
 	if err != nil {
 		output.Errorln("cannot read the config: %v", err)
+		command.sseSend("builderror", "config: "+err.Error())
 		return
 	}
 	if err := command.cli.FileBasedRouter.Render(config.GoModName); err != nil {
 		output.Errorln("cannot build routes: %v", err)
+		command.sseSend("builderror", "routes: "+err.Error())
 		return
 	}
 	if err := syncEmbeddedPublicFile(&config); err != nil {
 		output.Errorln("cannot sync the embedded public file: %v", err)
+		command.sseSend("builderror", "embedded: "+err.Error())
 		return
 	}
 
 	command.phase("Build templ...")
 	if err := command.cli.Templ.Render(); err != nil {
 		output.Errorln("templ failed: %v", err)
+		command.sseSend("builderror", "templ: "+err.Error())
 		return
 	}
 
-	// WASM must finish before restarting the app — browser reloads immediately after.
-	command.buildWasmAll()
+	// Use cheaper compression and skip the second optimizer pass in dev.
+	command.cli.Wasm.DevShaping = true
+	// The background stage prints the aggregate itself, with the duration of
+	// the whole stage, so GenerateAll must not print its own copy.
+	command.cli.Wasm.QuietSummary = true
 
+	// Start WASM compile in background. WASM artifacts are static files under
+	// public/wasm/ served from disk per request, so first paint never needs to
+	// wait for a compile. The background stage is serialized by its own mutex
+	// so a burst of saves queues GenerateAll calls instead of racing them.
+	if command.sseSend == nil {
+		command.sseSend = command.cli.Proxy.Sse.Send
+	}
+	command.startWasmBuild()
+
+	listenAddr := resolveListenAddr()
 	command.phase("Build app...")
 	// Build the whole package ("."), not just main.go: the server config now lives in
 	// gothic.config.go (var Config, referenced from main.go as Config.Runtime), so a
@@ -449,6 +535,7 @@ func (command *HotReloadCommand) rebuild() {
 	buildCmd.Stderr = os.Stderr
 	if err := buildCmd.Run(); err != nil {
 		output.Errorln("cannot build the app: %v", err)
+		command.sseSend("builderror", "go build: "+err.Error())
 		return
 	}
 
@@ -481,7 +568,6 @@ func (command *HotReloadCommand) rebuild() {
 	runCmd.Stdout = os.Stdout
 	runCmd.Stderr = os.Stderr
 	command.runCmd = runCmd
-	command.cli.Proxy.Sse.Send("message", "reload")
 	done := make(chan struct{})
 	command.runDone = done
 	go func() {
@@ -493,33 +579,54 @@ func (command *HotReloadCommand) rebuild() {
 		}
 	}()
 
+	command.notifyReload(listenAddr, 2*time.Second)
+
 	// Closing line of the cycle: says it finished and what it cost. "Rebuilt"
-	// rather than "Ready" because the app is only starting here — claiming
+	// rather than "Ready" because the app is only starting here, so claiming
 	// readiness would be a lie whenever it fails to boot.
 	output.Println("Rebuilt in %s", output.Accent(time.Since(start).Round(time.Millisecond).String()))
 }
 
-func (command *HotReloadCommand) buildWasmAll() {
+// notifyReload waits for the new server to own the port and then tells the
+// browser to reload. The wait is an optimisation: it stops the refetch from
+// landing on a socket nobody is listening on yet, which the proxy would
+// otherwise absorb as a retry. Expiring the budget is NOT a reason to withhold
+// the event. The proxy's transport retries a refused connection on its own,
+// while a withheld event leaves the page stale until a manual refresh, which
+// reads as "hot reload is broken" on any machine slow enough to miss the
+// budget.
+func (command *HotReloadCommand) notifyReload(addr string, budget time.Duration) {
+	waitForPort(command.processCtx(), addr, budget)
+	command.sseSend("message", "reload")
+}
+
+func (command *HotReloadCommand) buildWasmAll() (int, error) {
+	// Gate: skip the whole stage when no input file has changed.
+	if !wasmInputChanged() {
+		return 0, nil
+	}
+
 	command.cli.Wasm.PregenerateTopicStubs()
 	pages, err := command.cli.Wasm.ScanPages("src/pages", "src/components")
 	if err != nil {
 		if strings.Contains(err.Error(), "go mod tidy") || strings.Contains(err.Error(), "updates to go.mod needed") {
-			wasmLogf("go.mod out of date — running go mod tidy...")
+			wasmLogf("go.mod out of date, running go mod tidy...")
 			tidy := exec.Command("go", "mod", "tidy")
 			tidy.Stderr = os.Stderr
 			if tidyErr := tidy.Run(); tidyErr != nil {
 				wasmErrorf("go mod tidy failed: %v", tidyErr)
-				return
+				return 0, tidyErr
 			}
 			pages, err = command.cli.Wasm.ScanPages("src/pages", "src/components")
 		}
 		if err != nil {
 			wasmErrorf("scan failed: %v", err)
-			return
+			return 0, err
 		}
 	}
 	if len(pages) == 0 {
-		return
+		recordWasmDigest(nil)
+		return 0, nil
 	}
 	var nPages, nComponents int
 	for _, p := range pages {
@@ -542,7 +649,61 @@ func (command *HotReloadCommand) buildWasmAll() {
 	}
 	if err := command.cli.Wasm.GenerateAll(pages, "public/wasm"); err != nil {
 		wasmErrorf("build failed (continuing with stale binaries): %v", err)
+		return 0, err
 	}
+
+	// Persist digest only after a successful build. The local package dirs
+	// come from the scan that just completed.
+	recordWasmDigest(collectWasmLocalDirs(pages))
+	return int(command.cli.Wasm.RebuiltCount()), nil
+}
+
+// startWasmBuild spawns the WASM compile in a background goroutine hung off
+// the session context. It is serialised by wasmMu so a burst of saves queues
+// GenerateAll calls instead of racing them. A second reload is pushed only
+// when at least one unit actually rebuilt; a cache-hit pass skips it.
+func (command *HotReloadCommand) startWasmBuild() {
+	if command.wasmStage == nil {
+		command.wasmStage = command.buildWasmAll
+	}
+
+	go func() {
+		command.wasmMu.Lock()
+		defer command.wasmMu.Unlock()
+
+		wasmStart := time.Now()
+		rebuiltCount, buildErr := command.wasmStage()
+
+		// If the session was cancelled during the build, discard the result
+		// and return without sending events, the browser is gone.
+		if command.processCtx().Err() != nil {
+			return
+		}
+
+		if buildErr != nil {
+			command.sseSend("builderror", buildErr.Error())
+			return
+		}
+
+		// Clear the badge before any reload, so the document the browser swaps
+		// in starts with the build already settled. A reload cannot carry this
+		// signal on its own: the paint reload fires while the compile is still
+		// running, and the two are indistinguishable on the client.
+		command.sseSend("builddone", "")
+
+		// Push a second reload only when at least one unit actually rebuilt.
+		if rebuiltCount > 0 {
+			command.sseSend("message", "reload")
+		}
+
+		// The one aggregate line of the cycle. GenerateAll stays quiet (see
+		// QuietSummary) so this can carry the whole stage's duration, scan
+		// included, rather than just the generate phase.
+		elapsed := output.Accent(time.Since(wasmStart).Round(time.Millisecond).String())
+		if line := wasmSummaryLine(command.cli.Wasm.UpToDateCount(), int32(rebuiltCount), elapsed); line != "" {
+			wasmLogf("%s", line)
+		}
+	}()
 }
 
 func (command *HotReloadCommand) defaultOpenBrowser(url string) error {

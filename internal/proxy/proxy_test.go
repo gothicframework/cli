@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -266,7 +267,7 @@ func TestRoundTripper_ContextCancellation(t *testing.T) {
 // so we use a tiny count and delay to keep the test fast.
 //
 // Note: the loop only retries on transport errors (connection failures). It
-// does NOT retry on HTTP error status codes like 503 — a 503 returns with a
+// does NOT retry on HTTP error status codes like 503, a 503 returns with a
 // nil error and RoundTrip returns it immediately on the first attempt. That
 // 503-passthrough behavior is therefore not a retry path and is not asserted
 // here.
@@ -296,6 +297,140 @@ func TestRoundTripper_RetriesUntilMaxRetries(t *testing.T) {
 	if !strings.Contains(err.Error(), "max retries reached") {
 		t.Errorf("expected max-retries error, got %v", err)
 	}
+}
+
+// TestRoundTripper_DelayCeiling proves delayForRetry never exceeds maxDelay
+// across all retry indices for the production configuration.
+func TestRoundTripper_DelayCeiling(t *testing.T) {
+	rt := &roundTripper{
+		initialDelay:    100 * time.Millisecond,
+		backoffExponent: 1.5,
+		maxDelay:        250 * time.Millisecond,
+	}
+	for retry := 0; retry < 100; retry++ {
+		d := rt.delayForRetry(retry)
+		if d > rt.maxDelay {
+			t.Errorf("retry %d: delay %v exceeds maxDelay %v", retry, d, rt.maxDelay)
+		}
+	}
+}
+
+// TestRoundTripper_TotalWorstCaseBounded verifies that the cumulative delay
+// across all maxRetries (20) with a 250 ms ceiling is at most 4.5 s, and
+// states the exact value in the output for pinning.
+func TestRoundTripper_TotalWorstCaseBounded(t *testing.T) {
+	rt := &roundTripper{
+		maxRetries:      20,
+		initialDelay:    100 * time.Millisecond,
+		backoffExponent: 1.5,
+		maxDelay:        250 * time.Millisecond,
+	}
+	var total time.Duration
+	// delays are computed for retries 0 through maxRetries-2 (the last
+	// attempt does not wait, it returns the error immediately).
+	for retry := 0; retry < rt.maxRetries-1; retry++ {
+		total += rt.delayForRetry(retry)
+	}
+	if total > 5*time.Second {
+		t.Errorf("total worst-case delay %v exceeds 5 s", total)
+	}
+	t.Logf("total worst-case delay with ceiling: %v (capped at 250 ms)", total)
+	// Exact value: with time.Duration truncating float to int64,
+	// retries 0-2 compute as 100/100/200 ms, then 16 × 250 ms = 4.4 s.
+	const expected = 4400 * time.Millisecond
+	if total != expected {
+		t.Errorf("expected exact total %v, got %v", expected, total)
+	}
+}
+
+// TestRoundTripper_RetriesWithProductionConfig proves the production
+// roundTripper configuration (maxRetries=20, 250 ms ceiling) exhausts retries
+// and returns a max-retries error like the lightweight version, pinning the
+// shipped values in a test. Cumulative wait is ~4.5 s so the test times out
+// safely within 10 s.
+func TestRoundTripper_RetriesWithProductionConfig(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+
+	rt := &roundTripper{
+		maxRetries:      20,
+		initialDelay:    100 * time.Millisecond,
+		backoffExponent: 1.5,
+		maxDelay:        250 * time.Millisecond,
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/", nil)
+	resp, err := rt.RoundTrip(req)
+	if resp != nil {
+		t.Errorf("expected nil response after exhausting retries, got %v", resp)
+	}
+	if err == nil {
+		t.Fatal("expected error after exhausting retries")
+	}
+	if !strings.Contains(err.Error(), "max retries reached") {
+		t.Errorf("expected max-retries error, got %v", err)
+	}
+}
+
+// TestSend_ConcurrentDisconnect proves that subscribers disconnecting
+// concurrently with Send does not panic. Many subscribers register,
+// disconnect after a short delay, while sends fire in rapid succession.
+func TestSend_ConcurrentDisconnect(t *testing.T) {
+	sse := NewsseHandler()
+	var wg sync.WaitGroup
+
+	// Register and immediately disconnect N subscribers while sends fire.
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		_, cancel := context.WithCancel(context.Background())
+
+		// Simulate an SSE subscriber: register, wait briefly, cancel.
+		go func() {
+			defer wg.Done()
+			defer cancel()
+
+			id := atomic.AddInt64(&sse.counter, 1)
+			sse.m.Lock()
+			events := make(chan event, 1)
+			sse.requests[id] = events
+			sse.m.Unlock()
+
+			// Read from events so the buffered channel doesn't fill up,
+			// but cancel after a short random-ish interval.
+			done := make(chan struct{})
+			go func() {
+				for {
+					select {
+					case <-events:
+					case <-done:
+						return
+					}
+				}
+			}()
+
+			// Give the subscriber time to be active before cancelling.
+			time.Sleep(time.Duration(i) * 100 * time.Microsecond)
+			cancel()
+
+			sse.m.Lock()
+			delete(sse.requests, id)
+			close(events)
+			sse.m.Unlock()
+			close(done)
+		}()
+	}
+
+	// Fire sends while subscribers come and go.
+	for i := 0; i < 20; i++ {
+		time.Sleep(50 * time.Microsecond)
+		sse.Send("message", "reload")
+	}
+
+	wg.Wait()
 }
 
 // stubProxyTarget wires ProxyHelper.p to a backend so ServeHTTP can fall through
@@ -630,4 +765,167 @@ func mustParseURL(rawURL string) *url.URL {
 		panic(err)
 	}
 	return u
+}
+
+// TestSendReplaysBuildStateToNewSubscriber covers the reason build state is
+// remembered at all: the paint reload disconnects the browser while the compile
+// is still running, so the document that comes back must be told a build is
+// still in flight instead of looking finished on the previous binary.
+func TestSendReplaysBuildStateToNewSubscriber(t *testing.T) {
+	s := NewsseHandler()
+	s.Send("building", "src/pages/counter.templ")
+
+	srv := httptest.NewServer(s)
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// The stream opens with its retry hint, so read until the replayed event
+	// arrives rather than assuming it lands in the first chunk.
+	var got string
+	buf := make([]byte, 256)
+	for i := 0; i < 4 && !strings.Contains(got, "event: building"); i++ {
+		n, err := resp.Body.Read(buf)
+		got += string(buf[:n])
+		if err != nil {
+			break
+		}
+	}
+	if !strings.Contains(got, "event: building") || !strings.Contains(got, "src/pages/counter.templ") {
+		t.Errorf("new subscriber did not receive the pending build state, got %q", got)
+	}
+}
+
+// TestBuildDoneClearsReplayedState proves the badge state does not outlive the
+// build: once the stage settles, a fresh subscriber must not be told a compile
+// is running.
+func TestBuildDoneClearsReplayedState(t *testing.T) {
+	s := NewsseHandler()
+	s.Send("building", "src/pages/counter.templ")
+	s.Send("builddone", "")
+
+	if s.buildState != nil {
+		t.Fatalf("buildState = %+v, want nil after builddone", s.buildState)
+	}
+}
+
+// TestSendDeliversBurstWithoutDropping guards the ordering the badge depends
+// on: a cycle emits builddone immediately followed by reload, and a one-slot
+// buffer silently dropped the reload, so the page never refreshed.
+func TestSendDeliversBurstWithoutDropping(t *testing.T) {
+	s := NewsseHandler()
+	events := make(chan event, 4)
+	s.m.Lock()
+	s.requests[1] = events
+	s.m.Unlock()
+
+	s.Send("builddone", "")
+	s.Send("message", "reload")
+
+	if len(events) != 2 {
+		t.Fatalf("buffered %d events, want 2 (the burst must not be dropped)", len(events))
+	}
+	if e := <-events; e.Type != "builddone" {
+		t.Errorf("first event = %q, want builddone", e.Type)
+	}
+	if e := <-events; e.Type != "message" || e.Data != "reload" {
+		t.Errorf("second event = %q/%q, want message/reload", e.Type, e.Data)
+	}
+}
+
+// TestEncodeEventSplitsMultilineData pins the SSE framing for compiler errors.
+// A raw multi-line payload ends the frame at its first newline, so the browser
+// received the "package load errors:" header with every diagnostic stripped
+// off. One data line per source line is what the protocol requires and what
+// EventSource rejoins on the client.
+func TestEncodeEventSplitsMultilineData(t *testing.T) {
+	got := encodeEvent(event{Type: "builderror", Data: "wasm: load packages:\nfoo.go:12: undefined: bar\nbaz.go:3: syntax error"})
+	want := "event: builderror\n" +
+		"data: wasm: load packages:\n" +
+		"data: foo.go:12: undefined: bar\n" +
+		"data: baz.go:3: syntax error\n\n"
+	if got != want {
+		t.Errorf("encodeEvent() = %q, want %q", got, want)
+	}
+}
+
+// TestEncodeEventSingleLine keeps the common case byte-identical to the frame
+// the client has always received.
+func TestEncodeEventSingleLine(t *testing.T) {
+	if got, want := encodeEvent(event{Type: "message", Data: "reload"}), "event: message\ndata: reload\n\n"; got != want {
+		t.Errorf("encodeEvent() = %q, want %q", got, want)
+	}
+}
+
+// TestSubscribersCountsLiveTabs backs the rule that a session does not open a
+// second browser tab when one is already watching.
+func TestSubscribersCountsLiveTabs(t *testing.T) {
+	s := NewsseHandler()
+	if got := s.Subscribers(); got != 0 {
+		t.Fatalf("Subscribers() = %d on a fresh handler, want 0", got)
+	}
+
+	srv := httptest.NewServer(s)
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer resp.Body.Close()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for s.Subscribers() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := s.Subscribers(); got != 1 {
+		t.Errorf("Subscribers() = %d with one tab connected, want 1", got)
+	}
+
+	cancel()
+	deadline = time.Now().Add(2 * time.Second)
+	for s.Subscribers() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := s.Subscribers(); got != 0 {
+		t.Errorf("Subscribers() = %d after the tab left, want 0", got)
+	}
+}
+
+// TestStreamAdvertisesRetryInterval pins the hint that makes an orphaned tab
+// reconnect fast enough for the session to notice it before opening another.
+func TestStreamAdvertisesRetryInterval(t *testing.T) {
+	s := NewsseHandler()
+	srv := httptest.NewServer(s)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer resp.Body.Close()
+
+	buf := make([]byte, 64)
+	n, _ := resp.Body.Read(buf)
+	if got := string(buf[:n]); !strings.HasPrefix(got, "retry: ") {
+		t.Errorf("stream opened with %q, want a retry hint first", got)
+	}
 }

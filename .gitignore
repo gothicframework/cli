@@ -8,3 +8,15 @@
 /vendor/
 *.test
 coverage.out
+
+# Artifacts a test run can leave behind. The hot-reload loop builds into tmp/
+# and the routes codegen writes src/routes/, both relative to the working
+# directory, so a test whose goroutine outlives its chdir writes them into the
+# package directory instead of its temp dir. Scoped to those two packages on
+# purpose: a bare tmp/ or .gothicCli/ pattern would also swallow the scaffold
+# payload under internal/scaffold/, which must stay tracked because it ships
+# embedded in the binary.
+/internal/cmd/tmp/
+/internal/cmd/src/
+/internal/build/tmp/
+/internal/build/src/

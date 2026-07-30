@@ -18,10 +18,19 @@ type Entry struct {
 }
 
 // Loader is a one-shot loader over a directory's Go packages, indexed by
-// absolute file path.
+// absolute file path and by package path.
 type Loader struct {
 	Fset   *token.FileSet
 	byFile map[string]Entry
+	byPath map[string]*packages.Package
+}
+
+// ByPath returns the loaded package for the given package path (PkgPath), or
+// nil when the path is not in the loaded set. Without NeedDeps, packages
+// reachable through pkg.Imports carry only an ID, so callers needing GoFiles
+// or Module must look them up here.
+func (l *Loader) ByPath(p string) *packages.Package {
+	return l.byPath[p]
 }
 
 // NewLoader loads "./..." rooted at dir using go/packages and indexes every
@@ -36,7 +45,6 @@ func NewLoader(dir string) (*Loader, error) {
 			packages.NeedTypes |
 			packages.NeedTypesInfo |
 			packages.NeedImports |
-			packages.NeedDeps |
 			packages.NeedModule,
 		Dir:  dir,
 		Fset: fset,
@@ -54,6 +62,7 @@ func NewLoader(dir string) (*Loader, error) {
 	}
 
 	byFile := make(map[string]Entry)
+	byPath := make(map[string]*packages.Package, len(pkgs))
 	var errMsgs []string
 
 	for _, pkg := range pkgs {
@@ -63,6 +72,7 @@ func NewLoader(dir string) (*Loader, error) {
 			}
 			continue
 		}
+		byPath[pkg.PkgPath] = pkg
 		// Index-align CompiledGoFiles with Syntax.
 		n := len(pkg.CompiledGoFiles)
 		if len(pkg.Syntax) < n {
@@ -81,7 +91,7 @@ func NewLoader(dir string) (*Loader, error) {
 		return nil, fmt.Errorf("astx: package load errors:\n%s", strings.Join(errMsgs, "\n"))
 	}
 
-	return &Loader{Fset: fset, byFile: byFile}, nil
+	return &Loader{Fset: fset, byFile: byFile, byPath: byPath}, nil
 }
 
 // Get returns the loaded Entry for an absolute file path.

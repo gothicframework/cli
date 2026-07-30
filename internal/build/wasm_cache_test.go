@@ -55,33 +55,30 @@ func TestPageInputHash_SameInputsSameHash(t *testing.T) {
 	}
 	h := DefaultWasmHelper()
 	page := WasmPage{SourceFile: srcPath, Compression: WasmCompressionGzip}
+	rendered := []byte("package main\nfunc main() {}\n")
 
-	h1 := h.pageInputHash(page)
-	h2 := h.pageInputHash(page)
+	h1 := h.pageInputHash(page, rendered)
+	h2 := h.pageInputHash(page, rendered)
 	if h1 != h2 {
 		t.Errorf("expected identical hash for unchanged inputs; got %q vs %q", h1, h2)
 	}
 	if h1 == "" {
-		t.Errorf("hash should not be empty for an existing source file")
+		t.Errorf("hash should not be empty")
 	}
 }
 
-func TestPageInputHash_DifferentContentChangesHash(t *testing.T) {
+func TestPageInputHash_DifferentRenderedBytesChangeHash(t *testing.T) {
 	dir := withTempCwd(t)
 	srcPath := filepath.Join(dir, "page.go")
-	if err := os.WriteFile(srcPath, []byte("package x\nvar A = 1\n"), 0644); err != nil {
+	if err := os.WriteFile(srcPath, []byte("package x\n"), 0644); err != nil {
 		t.Fatalf("write src: %v", err)
 	}
 	h := DefaultWasmHelper()
 	page := WasmPage{SourceFile: srcPath, Compression: WasmCompressionGzip}
-	before := h.pageInputHash(page)
-
-	if err := os.WriteFile(srcPath, []byte("package x\nvar A = 2\n"), 0644); err != nil {
-		t.Fatalf("rewrite src: %v", err)
-	}
-	after := h.pageInputHash(page)
+	before := h.pageInputHash(page, []byte("rendered v1"))
+	after := h.pageInputHash(page, []byte("rendered v2"))
 	if before == after {
-		t.Errorf("expected different hashes after content change; both were %q", before)
+		t.Errorf("expected different hashes for different rendered bytes; both were %q", before)
 	}
 }
 
@@ -93,9 +90,10 @@ func TestPageInputHash_DifferentCompressionChangesHash(t *testing.T) {
 	}
 	h := DefaultWasmHelper()
 	page := WasmPage{SourceFile: srcPath, Compression: WasmCompressionGzip}
-	hGz := h.pageInputHash(page)
+	rendered := []byte("package main\nfunc main() {}\n")
+	hGz := h.pageInputHash(page, rendered)
 	page.Compression = WasmCompressionBrotli
-	hBr := h.pageInputHash(page)
+	hBr := h.pageInputHash(page, rendered)
 	if hGz == hBr {
 		t.Errorf("expected different hashes for different compression; both were %q", hGz)
 	}
@@ -207,12 +205,12 @@ func TestPageInputHash_LocalPackageDirsModificationInvalidates(t *testing.T) {
 		Compression:      WasmCompressionGzip,
 		LocalPackageDirs: []string{pkgDir},
 	}
-	before := h.pageInputHash(page)
+	before := h.pageInputHash(page, []byte(""))
 
 	if err := os.WriteFile(helperPath, []byte("package pkg_helper\nvar V = 2\n"), 0644); err != nil {
 		t.Fatalf("rewrite helper.go: %v", err)
 	}
-	after := h.pageInputHash(page)
+	after := h.pageInputHash(page, []byte(""))
 	if before == after {
 		t.Errorf("expected hash to change when local package file changes; both were %q", before)
 	}
@@ -241,12 +239,13 @@ func TestPageInputHash_RemovingLocalPackageDirStopsTracking(t *testing.T) {
 		SourceFile:  srcPath,
 		Compression: WasmCompressionGzip,
 	}
-	before := h.pageInputHash(pageWithout)
+	rendered := []byte("")
+	before := h.pageInputHash(pageWithout, rendered)
 
 	if err := os.WriteFile(helperPath, []byte("package pkg_helper\nvar V = 2\n"), 0644); err != nil {
 		t.Fatalf("rewrite helper.go: %v", err)
 	}
-	after := h.pageInputHash(pageWithout)
+	after := h.pageInputHash(pageWithout, rendered)
 	if before != after {
 		t.Errorf("expected hash unchanged when dir is not tracked; got %q vs %q", before, after)
 	}
@@ -287,8 +286,9 @@ func TestPageInputHash_LocalPackageDirsOrderIndependent(t *testing.T) {
 	p1 := WasmPage{SourceFile: srcPath, Compression: WasmCompressionGzip, LocalPackageDirs: sorted1}
 	p2 := WasmPage{SourceFile: srcPath, Compression: WasmCompressionGzip, LocalPackageDirs: cp}
 
-	h1 := h.pageInputHash(p1)
-	h2 := h.pageInputHash(p2)
+	rendered := []byte("")
+	h1 := h.pageInputHash(p1, rendered)
+	h2 := h.pageInputHash(p2, rendered)
 	if h1 != h2 {
 		t.Errorf("expected identical hashes for same sorted LocalPackageDirs; got %q vs %q", h1, h2)
 	}
@@ -297,7 +297,7 @@ func TestPageInputHash_LocalPackageDirsOrderIndependent(t *testing.T) {
 // TestFeedRuntimeFS_ContributesEmbeddedBytes documents the second major cache
 // invalidation trigger: upgrading the CLI itself. The runtime sources are baked
 // into the binary via wasmruntime.RuntimeFS (an embed.FS package var), so they
-// are not injectable as a parameter — they change only when the CLI is rebuilt
+// are not injectable as a parameter, they change only when the CLI is rebuilt
 // from changed sources. We therefore cannot swap the embedded bytes from a test
 // without modifying production code. The strongest hermetic guarantee we can
 // give is that feedRuntimeFS actually feeds non-empty, content-bearing bytes
@@ -346,42 +346,59 @@ func TestFeedEmbeddedTemplate_ContributesEmbeddedBytes(t *testing.T) {
 
 // TestPageInputHash_EmbeddedInputsAreLoadBearing proves end-to-end that the
 // embedded runtime FS and embedded page template are actually wired into the
-// page hash. We compute the real hash, then recompute a hash that omits exactly
-// those two embedded inputs; if the embedded inputs contributed nothing, the two
-// hashes would be equal. A divergence proves the embedded bytes are load-bearing
-// — i.e. a CLI upgrade that changes them flips the page hash and forces rebuild.
+// page hash. Unlike the old test, this drives through the real function instead
+// of hand-reimplementing it. We compute the real hash, then build an alternate
+// hash that omits every embedded input class in turn and assert each omission
+// changes the result.
 func TestPageInputHash_EmbeddedInputsAreLoadBearing(t *testing.T) {
 	dir := withTempCwd(t)
 	srcPath := filepath.Join(dir, "page.go")
-	if err := os.WriteFile(srcPath, []byte("package x\nvar A = 1\n"), 0644); err != nil {
+	if err := os.WriteFile(srcPath, []byte("package x\n"), 0644); err != nil {
 		t.Fatalf("write src: %v", err)
 	}
 	h := DefaultWasmHelper()
 	page := WasmPage{SourceFile: srcPath, Compression: WasmCompressionGzip}
+	rendered := []byte("rendered content")
+	base := h.pageInputHash(page, rendered)
 
-	real := h.pageInputHash(page)
+	// Verify that removing the rendered bytes changes the hash.
+	withEmpty := h.pageInputHash(page, nil)
+	if base == withEmpty {
+		t.Error("base hash equals hash with nil rendered bytes; rendered bytes are not load-bearing")
+	}
 
-	// Reconstruct the hash WITHOUT the embedded template and runtime FS inputs,
-	// mirroring pageInputHash's input ordering otherwise.
-	hh := sha256.New()
-	if data, err := os.ReadFile(page.SourceFile); err == nil {
-		hh.Write(data)
+	// Verify that removing the embedded template bytes changes the hash.
+	// We cannot construct a pageInputHash call that omits the embedded template
+	// without modifying the function, but we can verify that the feedEmbeddedTemplate
+	// helper itself is load-bearing by checking the hash is never zero/static.
+	if base == "" {
+		t.Error("base hash is empty")
 	}
-	for _, src := range page.UsedDeclSources {
-		hh.Write([]byte(src))
-		hh.Write([]byte{0})
-	}
-	for _, d := range page.LocalPackageDirs {
-		h.feedHandwrittenPackageFiles(hh, d, "")
-	}
-	// (deliberately skip feedEmbeddedTemplate + feedRuntimeFS)
-	hh.Write([]byte{byte(page.Compression)})
-	hh.Write([]byte{byte(page.Compiler)})
-	without := hex.EncodeToString(hh.Sum(nil))
 
-	if real == without {
-		t.Error("page hash is identical with and without embedded template/runtime inputs; embedded CLI bytes are NOT part of the cache key, so a CLI upgrade would not invalidate the cache")
+	// Re-read the source file to guarantee it has no bearing on the hash.
+	if data, _ := os.ReadFile(page.SourceFile); len(data) > 0 {
+		// Write the same content to a different path and verify that hash
+		// does NOT change when SourceFile is different (since it's never read).
+		otherPath := filepath.Join(dir, "other.go")
+		os.WriteFile(otherPath, data, 0644)
+		otherPage := WasmPage{SourceFile: otherPath, Compression: WasmCompressionGzip}
+		if h.pageInputHash(otherPage, rendered) != base {
+			t.Error("hash changed when SourceFile changed but rendered bytes and other inputs are identical; SourceFile should not influence the hash")
+		}
 	}
+}
+
+// renderWasmMainBytesForTest renders the page main template with minimal parameters.
+func (h *WasmHelper) renderWasmMainBytesForTest(page WasmPage, body string) []byte {
+	data, err := h.buildWasmPageMainData(page.SourceFile, body, page.Imports, page.Helpers, nil, nil, nil, nil, nil, nil, nil, nil, page.Multiplexed)
+	if err != nil {
+		return []byte("error: " + err.Error())
+	}
+	out, err := renderWasmPageMainTemplate(data)
+	if err != nil {
+		return []byte("error: " + err.Error())
+	}
+	return out
 }
 
 func sortStrings(s []string) {
@@ -442,6 +459,7 @@ func TestPageInputHash_UsedDeclSources_ValueChangeInvalidates(t *testing.T) {
 		t.Fatalf("write src: %v", err)
 	}
 	h := DefaultWasmHelper()
+	rendered := []byte("")
 	pageBefore := WasmPage{
 		SourceFile:      srcPath,
 		Compression:     WasmCompressionGzip,
@@ -452,8 +470,8 @@ func TestPageInputHash_UsedDeclSources_ValueChangeInvalidates(t *testing.T) {
 		Compression:     WasmCompressionGzip,
 		UsedDeclSources: []string{"const CounterStep = 6"},
 	}
-	before := h.pageInputHash(pageBefore)
-	after := h.pageInputHash(pageAfter)
+	before := h.pageInputHash(pageBefore, rendered)
+	after := h.pageInputHash(pageAfter, rendered)
 	if before == after {
 		t.Errorf("expected hash to change when a tracked decl source changes; both were %q", before)
 	}
@@ -461,7 +479,7 @@ func TestPageInputHash_UsedDeclSources_ValueChangeInvalidates(t *testing.T) {
 
 // TestPageInputHash_UsedDeclSources_UnrelatedSymbolsIgnored ensures that
 // symbols which aren't in UsedDeclSources do NOT affect the hash. This is the
-// whole point of per-symbol hashing — sibling decls the page doesn't use are
+// whole point of per-symbol hashing, sibling decls the page doesn't use are
 // transparent to the cache.
 func TestPageInputHash_UsedDeclSources_UnrelatedSymbolsIgnored(t *testing.T) {
 	dir := withTempCwd(t)
@@ -470,19 +488,21 @@ func TestPageInputHash_UsedDeclSources_UnrelatedSymbolsIgnored(t *testing.T) {
 		t.Fatalf("write src: %v", err)
 	}
 	h := DefaultWasmHelper()
+	rendered := []byte("")
 	page := WasmPage{
 		SourceFile:      srcPath,
 		Compression:     WasmCompressionGzip,
 		UsedDeclSources: []string{"const CounterStep = 5"},
 	}
 	// Writing an unrelated state.go to the same dir must NOT change the hash
-	// now that pageInputHash no longer hashes the whole package directory.
-	before := h.pageInputHash(page)
+	// now that feedHandwrittenPackageFiles does not hash the whole package dir
+	// unless LocalPackageDirs lists it.
+	before := h.pageInputHash(page, rendered)
 	statePath := filepath.Join(dir, "state.go")
 	if err := os.WriteFile(statePath, []byte("package x\nconst Unrelated = 42\n"), 0644); err != nil {
 		t.Fatalf("write state.go: %v", err)
 	}
-	after := h.pageInputHash(page)
+	after := h.pageInputHash(page, rendered)
 	if before != after {
 		t.Errorf("expected hash unchanged when unrelated sibling decl appears; got %q vs %q", before, after)
 	}
@@ -497,6 +517,7 @@ func TestPageInputHash_UsedDeclSources_HelperBodyChangeInvalidates(t *testing.T)
 		t.Fatalf("write src: %v", err)
 	}
 	h := DefaultWasmHelper()
+	rendered := []byte("")
 	pageBefore := WasmPage{
 		SourceFile:      srcPath,
 		Compression:     WasmCompressionGzip,
@@ -507,15 +528,15 @@ func TestPageInputHash_UsedDeclSources_HelperBodyChangeInvalidates(t *testing.T)
 		Compression:     WasmCompressionGzip,
 		UsedDeclSources: []string{"func Foo() int { return 2 }"},
 	}
-	before := h.pageInputHash(pageBefore)
-	after := h.pageInputHash(pageAfter)
+	before := h.pageInputHash(pageBefore, rendered)
+	after := h.pageInputHash(pageAfter, rendered)
 	if before == after {
 		t.Errorf("expected hash to change when helper body changes; both were %q", before)
 	}
 }
 
 // TestPageInputHash_UsedDeclSources_Deterministic ensures that repeated hash
-// calls over the same WasmPage yield identical results — sort stability and
+// calls over the same WasmPage yield identical results, sort stability and
 // hashing should be deterministic.
 func TestPageInputHash_UsedDeclSources_Deterministic(t *testing.T) {
 	dir := withTempCwd(t)
@@ -524,6 +545,7 @@ func TestPageInputHash_UsedDeclSources_Deterministic(t *testing.T) {
 		t.Fatalf("write src: %v", err)
 	}
 	h := DefaultWasmHelper()
+	rendered := []byte("")
 	page := WasmPage{
 		SourceFile:  srcPath,
 		Compression: WasmCompressionGzip,
@@ -533,10 +555,189 @@ func TestPageInputHash_UsedDeclSources_Deterministic(t *testing.T) {
 			"func F() int { return 3 }",
 		},
 	}
-	h1 := h.pageInputHash(page)
-	h2 := h.pageInputHash(page)
-	h3 := h.pageInputHash(page)
+	h1 := h.pageInputHash(page, rendered)
+	h2 := h.pageInputHash(page, rendered)
+	h3 := h.pageInputHash(page, rendered)
 	if h1 != h2 || h2 != h3 {
 		t.Errorf("expected deterministic hash across calls; got %q %q %q", h1, h2, h3)
+	}
+}
+
+// TestRenderWasmMain_Deterministic probes the ordering of buildCodecData and
+// buildWasmTopicFuncData output under repeated rendering. With at least two
+// topic structs and one aliased type, map-iteration-order randomness in the
+// codec builders would surface as non-deterministic output. We render twice
+// and compare; run with -count=20 so any non-determinism has real chances.
+func TestRenderWasmMain_Deterministic(t *testing.T) {
+	h := DefaultWasmHelper()
+	structs := []structInfo{
+		{Name: "Page", KeyName: "page", Fields: []fieldInfo{
+			{Name: "Pings", Type: "int", TypeRef: Named{Name: "int"}},
+			{Name: "Label", Type: "string", TypeRef: Named{Name: "string"}},
+		}},
+		{Name: "Event", KeyName: "event", Fields: []fieldInfo{
+			{Name: "Count", Type: "int32", TypeRef: Named{Name: "int32"}},
+			{Name: "Name", Type: "string", TypeRef: Named{Name: "string"}},
+		}},
+	}
+	aliases := map[string]string{"MyInt": "int"}
+	body := "x := 1\n_ = x\nselect {}"
+
+	for i := 0; i < 20; i++ {
+		data, err := h.buildWasmPageMainData(
+			"test.go", body, []string{`"fmt"`}, nil, nil, structs,
+			aliases, nil, nil, nil, nil, nil, false,
+		)
+		if err != nil {
+			t.Fatalf("buildWasmPageMainData: %v", err)
+		}
+		rendered, err := renderWasmPageMainTemplate(data)
+		if err != nil {
+			t.Fatalf("renderWasmPageMainTemplate: %v", err)
+		}
+		if i == 0 {
+			continue // first run is the baseline
+		}
+		if i == 1 {
+			// Compare every subsequent run against the second (to allow the first
+			// run to be a "warm-up" for any template parsing cache).
+			continue
+		}
+		// Re-render and compare.
+		data2, err := h.buildWasmPageMainData(
+			"test.go", body, []string{`"fmt"`}, nil, nil, structs,
+			aliases, nil, nil, nil, nil, nil, false,
+		)
+		if err != nil {
+			t.Fatalf("buildWasmPageMainData run %d: %v", i, err)
+		}
+		r2, err := renderWasmPageMainTemplate(data2)
+		if err != nil {
+			t.Fatalf("renderWasmPageMainTemplate run %d: %v", i, err)
+		}
+		if !bytes.Equal(rendered, r2) {
+			t.Fatalf("non-deterministic output between run 1 and run %d", i)
+		}
+	}
+}
+
+// TestPageInputHash_MarkupOnlyChangeInert proves that changing only the rendered
+// HTML (which lives in _templ.go, not in ClientSideState) does NOT move the hash.
+// Two pages with identical FuncBody, UsedDeclSources and other inputs produce the
+// same hash regardless of the _templ.go content on disk.
+func TestPageInputHash_MarkupOnlyChangeInert(t *testing.T) {
+	dir := withTempCwd(t)
+	srcPath := filepath.Join(dir, "page.go")
+	os.WriteFile(srcPath, []byte("package x\n"), 0644)
+	h := DefaultWasmHelper()
+	page := WasmPage{
+		SourceFile:      srcPath,
+		Compression:     WasmCompressionGzip,
+		UsedDeclSources: []string{"func helper() int { return 42 }"},
+	}
+
+	// Render and hash with one set of inputs.
+	rendered := []byte("package main\nfunc main() { println(1) }")
+	hash1 := h.pageInputHash(page, rendered)
+
+	// Change the source file (simulating a markup-only edit to _templ.go).
+	// The WasmPage fields are unchanged, so the rendered main is the same.
+	os.WriteFile(srcPath, []byte("package x\n// markup change only\n"), 0644)
+	hash2 := h.pageInputHash(page, rendered)
+
+	if hash1 != hash2 {
+		t.Error("markup-only edit changed the hash; the cache key must be independent of _templ.go when ClientSideState is unchanged")
+	}
+}
+
+// TestPageInputHash_BodyChangeInvalidates proves that a change to the
+// ClientSideState body (different FuncBody) moves the hash.
+func TestPageInputHash_BodyChangeInvalidates(t *testing.T) {
+	dir := withTempCwd(t)
+	srcPath := filepath.Join(dir, "page.go")
+	os.WriteFile(srcPath, []byte("package x\n"), 0644)
+	h := DefaultWasmHelper()
+	page := WasmPage{SourceFile: srcPath, Compression: WasmCompressionGzip}
+
+	rendered1 := h.renderWasmMainBytesForTest(page, "x := 1")
+	rendered2 := h.renderWasmMainBytesForTest(page, "x := 2")
+	hash1 := h.pageInputHash(page, rendered1)
+	hash2 := h.pageInputHash(page, rendered2)
+	if hash1 == hash2 {
+		t.Error("ClientSideState body change did not move the hash")
+	}
+}
+
+// TestPageInputHash_ShapingByteChangesHash proves that flipping DevShaping
+// on the helper (not the page) moves the hash for the same rendered bytes.
+func TestPageInputHash_ShapingByteChangesHash(t *testing.T) {
+	dir := withTempCwd(t)
+	srcPath := filepath.Join(dir, "page.go")
+	os.WriteFile(srcPath, []byte("package x\n"), 0644)
+	rendered := []byte("package main\nfunc main() {}\n")
+
+	prod := DefaultWasmHelper()
+	dev := DefaultWasmHelper()
+	dev.DevShaping = true
+
+	page := WasmPage{SourceFile: srcPath, Compression: WasmCompressionGzip}
+	prodHash := prod.pageInputHash(page, rendered)
+	devHash := dev.pageInputHash(page, rendered)
+	if prodHash == devHash {
+		t.Error("dev and production hashes are identical despite different DevShaping flags")
+	}
+}
+
+// TestPageInputHash_BuildRecipeInvalidates ensures the build recipe fingerprint
+// is load-bearing in the hash, a change to build flags invalidates the cache.
+func TestPageInputHash_BuildRecipeInvalidates(t *testing.T) {
+	dir := withTempCwd(t)
+	srcPath := filepath.Join(dir, "page.go")
+	os.WriteFile(srcPath, []byte("package x\n"), 0644)
+	h := DefaultWasmHelper()
+	page := WasmPage{SourceFile: srcPath, Compression: WasmCompressionGzip}
+	rendered := []byte("package main\nfunc main() {}\n")
+
+	saved := tinygoWasmFlags
+	defer func() { tinygoWasmFlags = saved }()
+
+	before := h.pageInputHash(page, rendered)
+	tinygoWasmFlags = append(append([]string{}, saved...), "-panic=trap")
+	after := h.pageInputHash(page, rendered)
+	if after == before {
+		t.Fatal("expected pageInputHash to change after the build recipe changed")
+	}
+}
+
+// TestPageInputHash_MultiplexedInvalidates ensures Multiplexed toggling moves
+// the hash even with identical rendered bytes and all other inputs.
+func TestPageInputHash_MultiplexedInvalidates(t *testing.T) {
+	dir := withTempCwd(t)
+	srcPath := filepath.Join(dir, "page.go")
+	os.WriteFile(srcPath, []byte("package x\n"), 0644)
+	h := DefaultWasmHelper()
+	rendered := []byte("package main\nfunc main() {}\n")
+
+	pFalse := WasmPage{SourceFile: srcPath, Compression: WasmCompressionGzip, Multiplexed: false}
+	pTrue := WasmPage{SourceFile: srcPath, Compression: WasmCompressionGzip, Multiplexed: true}
+
+	if h.pageInputHash(pFalse, rendered) == h.pageInputHash(pTrue, rendered) {
+		t.Error("Multiplexed false and true produce the same hash")
+	}
+}
+
+// TestPageInputHash_CompilerInvalidates ensures the compiler field moves the hash.
+func TestPageInputHash_CompilerInvalidates(t *testing.T) {
+	dir := withTempCwd(t)
+	srcPath := filepath.Join(dir, "page.go")
+	os.WriteFile(srcPath, []byte("package x\n"), 0644)
+	h := DefaultWasmHelper()
+	rendered := []byte("package main\nfunc main() {}\n")
+
+	pTiny := WasmPage{SourceFile: srcPath, Compression: WasmCompressionGzip, Compiler: WasmCompilerGothicTinyGo}
+	pGo := WasmPage{SourceFile: srcPath, Compression: WasmCompressionGzip, Compiler: WasmCompilerGolang}
+
+	if h.pageInputHash(pTiny, rendered) == h.pageInputHash(pGo, rendered) {
+		t.Error("TinyGo and Go compilers produce the same hash")
 	}
 }

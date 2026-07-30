@@ -75,7 +75,7 @@ func (h *WasmHelper) scanFile(path string) (WasmPage, bool, error) {
 	}
 	entry, err := h.astLoader.Get(absPath)
 	if err != nil {
-		// File is not in any loaded package — silently skip (e.g. generated
+		// File is not in any loaded package, silently skip (e.g. generated
 		// files outside the module). This mirrors the old regex behaviour of
 		// quietly ignoring files with no match.
 		return WasmPage{}, false, nil
@@ -94,7 +94,7 @@ func (h *WasmHelper) scanFile(path string) (WasmPage, bool, error) {
 		return WasmPage{}, false, fmt.Errorf("wasm: extract helpers in %s: %w", path, err)
 	}
 
-	localPackageDirs := collectLocalPackageDirs(entry.Pkg, helperPkgs)
+	localPackageDirs := collectLocalPackageDirs(h.astLoader, entry.Pkg, helperPkgs)
 
 	importSpecs, err := astx.ExtractUsedImports(entry.Pkg, res.Body)
 	if err != nil {
@@ -113,7 +113,7 @@ func (h *WasmHelper) scanFile(path string) (WasmPage, bool, error) {
 
 	// Build a sorted, deterministic snapshot of the same-package decl sources
 	// for the WASM cache. Only decls that belong to the page's own package
-	// (i.e. those returned by ExtractUsedHelpers) are included — cross-package
+	// (i.e. those returned by ExtractUsedHelpers) are included, cross-package
 	// dependencies are covered separately by LocalPackageDirs hashing.
 	usedDeclSources := make([]string, 0, len(helperDecls))
 	for _, d := range helperDecls {
@@ -165,7 +165,7 @@ func (h *WasmHelper) scanFile(path string) (WasmPage, bool, error) {
 		jsonReaders, jsonRootRefs = buildJSONReaderStructs(decodeRoots, entry.Pkg.Types)
 	}
 
-	// Encode[T](v) mirrors Decode — same struct walk, opposite direction.
+	// Encode[T](v) mirrors Decode, same struct walk, opposite direction.
 	var jsonWriters []jsonReaderType
 	var jsonEncodeRefs []jsonRootRef
 	encodeRoots, eerr := collectJSONEncodeRoots(entry.Pkg, res.Body, path)
@@ -216,7 +216,13 @@ func (h *WasmHelper) scanFile(path string) (WasmPage, bool, error) {
 // the page body. Stdlib, third-party, and vendored packages are skipped. These
 // directories feed into the per-page WASM cache hash so a change to any file in
 // an imported local package invalidates the cache.
-func collectLocalPackageDirs(pagePkg *packages.Package, helperPkgs []*types.PkgName) []string {
+//
+// loader is used to resolve local package directories. Without NeedDeps, the
+// Imports map on pagePkg holds only stubs (ID only), so the loader's byPath
+// index, which contains every package loaded by the top-level "./..." query —
+// is the primary lookup. pagePkg.Imports[path] is a fallback for the rare case
+// where a dependency was NOT matched by "./..." (e.g. a synthetic package).
+func collectLocalPackageDirs(loader *astx.Loader, pagePkg *packages.Package, helperPkgs []*types.PkgName) []string {
 	if pagePkg == nil || len(helperPkgs) == 0 {
 		return nil
 	}
@@ -239,8 +245,14 @@ func collectLocalPackageDirs(pagePkg *packages.Package, helperPkgs []*types.PkgN
 		if path != userModulePath && !strings.HasPrefix(path, prefix) {
 			continue
 		}
-		loadedPkg, ok := pagePkg.Imports[path]
-		if !ok || loadedPkg == nil {
+		// Resolve through the loader's index first (the authoritative source
+		// for every package matched by "./..."); fall back to pagePkg.Imports
+		// for packages not in the top-level set.
+		loadedPkg := loader.ByPath(path)
+		if loadedPkg == nil {
+			loadedPkg, _ = pagePkg.Imports[path]
+		}
+		if loadedPkg == nil {
 			continue
 		}
 		if loadedPkg.Module != nil && loadedPkg.Module.Path != userModulePath {

@@ -7,7 +7,7 @@ import (
 )
 
 // astxDir returns this package's directory, derived at runtime so the tests
-// work in a fresh clone, on CI, or on any machine — never hardcoded.
+// work in a fresh clone, on CI, or on any machine, never hardcoded.
 func astxDir(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -36,6 +36,25 @@ func TestNewLoader_LoadsSelf(t *testing.T) {
 	}
 	if entry.File == nil {
 		t.Fatalf("entry.File is nil for %q", anyPath)
+	}
+}
+
+func TestLoader_ByPath(t *testing.T) {
+	l, err := NewLoader(astxDir(t))
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	// The astx package itself must be in the index.
+	pkg := l.ByPath("github.com/gothicframework/cli/v3/internal/build/astx")
+	if pkg == nil {
+		t.Fatal("ByPath: expected non-nil for astx package, got nil")
+	}
+	if len(pkg.GoFiles) == 0 {
+		t.Errorf("ByPath: expected GoFiles to be populated without NeedDeps, got 0 files")
+	}
+	// Unknown path must return nil.
+	if pkg := l.ByPath("nonexistent/path"); pkg != nil {
+		t.Errorf("ByPath: expected nil for unknown path, got %v", pkg)
 	}
 }
 

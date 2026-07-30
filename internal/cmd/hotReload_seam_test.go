@@ -32,6 +32,7 @@ func TestHotReloadFullPathWithSeams(t *testing.T) {
 	var browserURL atomic.Value
 	cmd.openBrowserFn = func(u string) error { browserURL.Store(u); return nil }
 	cmd.sleeper = func(time.Duration) {} // no real sleep
+	cmd.browserProbeBudget = time.Nanosecond
 	cmd.proxyRunner = func(target *url.URL) error {
 		// Confirm the target URL was parsed from the default port.
 		if target.Host != "localhost:60714" {
@@ -60,6 +61,7 @@ func TestHotReloadProxyError(t *testing.T) {
 	cmd := newHotReloadCommandCli(&cli)
 	cmd.openBrowserFn = func(string) error { return nil }
 	cmd.sleeper = func(time.Duration) {}
+	cmd.browserProbeBudget = time.Nanosecond
 	cmd.proxyRunner = func(*url.URL) error { return errors.New("boom") }
 
 	err := cmd.HotReload()
@@ -83,6 +85,7 @@ func TestHotReloadHonorsHTTPListenAddr(t *testing.T) {
 	cmd.openBrowserFn = func(string) error { return nil }
 	cmd.sleeper = func(time.Duration) {}
 	var gotHost string
+	cmd.browserProbeBudget = time.Nanosecond
 	cmd.proxyRunner = func(target *url.URL) error { gotHost = target.Host; return nil }
 
 	if err := cmd.HotReload(); err != nil {

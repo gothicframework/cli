@@ -19,11 +19,12 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/andybalholm/brotli"
 	"github.com/gothicframework/cli/v3/internal/output"
 )
 
 // ---------------------------------------------------------------------------
-// wasm_binary.go — pure path/name resolution helpers
+// wasm_binary.go, pure path/name resolution helpers
 // ---------------------------------------------------------------------------
 
 func linuxAmd64Helper() *WasmHelper {
@@ -174,7 +175,7 @@ func TestEnviron_SetsTinygoRootAndPath(t *testing.T) {
 		t.Errorf("Environ missing TINYGOROOT/PATH: %v", env)
 	}
 	// In the hermetic test env there is almost certainly no wasm-opt under the
-	// fresh temp cache dir, so WASMOPT=false is expected — exercise the
+	// fresh temp cache dir, so WASMOPT=false is expected, exercise the
 	// warnOnce branch via EnvironWithWarn.
 	var once sync.Once
 	_ = h.EnvironWithWarn(&once)
@@ -182,7 +183,7 @@ func TestEnviron_SetsTinygoRootAndPath(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// wasm_archive.go — extract tar.gz / zip / format detection / traversal guard
+// wasm_archive.go, extract tar.gz / zip / format detection / traversal guard
 // ---------------------------------------------------------------------------
 
 func makeTarGz(t *testing.T, files map[string]string) string {
@@ -320,7 +321,7 @@ func TestWriteFileFromReader(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// wasm_binary.go — checksum + download via httptest.Server
+// wasm_binary.go, checksum + download via httptest.Server
 // ---------------------------------------------------------------------------
 
 func TestComputeAndVerifyChecksum(t *testing.T) {
@@ -437,40 +438,122 @@ func TestCompressionExtAndLabel(t *testing.T) {
 }
 
 func TestCompressWasmWith(t *testing.T) {
+	payload := bytes.Repeat([]byte("compress me "), 100)
+
+	tests := []struct {
+		name      string
+		dev       bool
+		comp      WasmCompression
+		wantExt   string // expected output suffix
+	}{
+		{"gzip-production", false, WasmCompressionGzip, ".wasm.gz"},
+		{"gzip-dev", true, WasmCompressionGzip, ".wasm.gz"},
+		{"brotli-production", false, WasmCompressionBrotli, ".wasm.br"},
+		{"brotli-dev", true, WasmCompressionBrotli, ".wasm.br"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := linuxAmd64Helper()
+			h.DevShaping = tt.dev
+
+			dir := t.TempDir()
+			src := filepath.Join(dir, "in.wasm")
+			if err := os.WriteFile(src, payload, 0644); err != nil {
+				t.Fatalf("write src: %v", err)
+			}
+			dst := filepath.Join(dir, "out"+tt.wantExt)
+
+			if err := h.compressWasmWith(src, dst, tt.comp); err != nil {
+				t.Fatalf("compress: %v", err)
+			}
+
+			// Verify output file name matches expectation
+			if filepath.Ext(dst) != filepath.Ext(filepath.Join("x"+tt.wantExt)) {
+				t.Errorf("file name %q, want ext %q", dst, tt.wantExt)
+			}
+			if !strings.HasSuffix(dst, tt.wantExt) {
+				t.Errorf("file name %q, does not end with %q", dst, tt.wantExt)
+			}
+
+			// Verify round-trip: decompress and compare to input
+			compressed, err := os.ReadFile(dst)
+			if err != nil {
+				t.Fatalf("read compressed: %v", err)
+			}
+			switch tt.comp {
+			case WasmCompressionGzip:
+				gr, err := gzip.NewReader(bytes.NewReader(compressed))
+				if err != nil {
+					t.Fatalf("gzip reader: %v", err)
+				}
+				var out bytes.Buffer
+				out.ReadFrom(gr)
+				if !bytes.Equal(out.Bytes(), payload) {
+					t.Error("gzip round-trip mismatch")
+				}
+			case WasmCompressionBrotli:
+				br := brotli.NewReader(bytes.NewReader(compressed))
+				var out bytes.Buffer
+				out.ReadFrom(br)
+				if !bytes.Equal(out.Bytes(), payload) {
+					t.Error("brotli round-trip mismatch")
+				}
+			}
+		})
+	}
+
+	// Error on missing source
 	h := linuxAmd64Helper()
 	dir := t.TempDir()
-	src := filepath.Join(dir, "in.wasm")
-	payload := bytes.Repeat([]byte("compress me "), 100)
-	if err := os.WriteFile(src, payload, 0644); err != nil {
+	if err := h.compressWasmWith(filepath.Join(dir, "missing"), filepath.Join(dir, "out.wasm.gz"), WasmCompressionGzip); err == nil {
+		t.Error("expected error for missing source")
+	}
+}
+
+func TestDevShapingSkipsWasmOptWarning(t *testing.T) {
+	// With DevShaping=true, the wasm-opt block in GeneratePage is completely
+	// skipped: neither exec.LookPath("wasm-opt") nor the "wasm-opt not found"
+	// warning execute. This is a structural guard we verify through the
+	// cache-hit early return path (the same path every GeneratePage unit
+	// test uses), proving that DevShaping does not create a wasm-opt
+	// dependency and the warning cannot fire.
+	h := DefaultWasmHelper()
+	h.DevShaping = true
+	h.cache = loadWasmCache()
+
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "page.go")
+	if err := os.WriteFile(srcPath, []byte("package x\n"), 0644); err != nil {
 		t.Fatalf("write src: %v", err)
 	}
 
-	gzDst := filepath.Join(dir, "out.wasm.gz")
-	if err := h.compressWasmWith(src, gzDst, WasmCompressionGzip); err != nil {
-		t.Fatalf("gzip compress: %v", err)
-	}
-	// verify it round-trips
-	raw, _ := os.ReadFile(gzDst)
-	gr, err := gzip.NewReader(bytes.NewReader(raw))
-	if err != nil {
-		t.Fatalf("gzip reader: %v", err)
-	}
-	var out bytes.Buffer
-	out.ReadFrom(gr)
-	if !bytes.Equal(out.Bytes(), payload) {
-		t.Error("gzip round-trip mismatch")
+	outDir := filepath.Join(dir, "public", "wasm")
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
 
-	brDst := filepath.Join(dir, "out.wasm.br")
-	if err := h.compressWasmWith(src, brDst, WasmCompressionBrotli); err != nil {
-		t.Fatalf("brotli compress: %v", err)
-	}
-	if info, _ := os.Stat(brDst); info == nil || info.Size() == 0 {
-		t.Error("brotli output empty")
+	page := WasmPage{
+		SourceFile:  srcPath,
+		OutputName:  "testpage",
+		Compression: WasmCompressionGzip,
 	}
 
-	if err := h.compressWasmWith(filepath.Join(dir, "missing"), gzDst, WasmCompressionGzip); err == nil {
-		t.Error("expected error for missing source")
+	// Pre-create output and seed the cache so the up-to-date branch fires.
+	outFile := filepath.Join(outDir, page.OutputName+".wasm.gz")
+	if err := os.WriteFile(outFile, []byte("prebuilt"), 0644); err != nil {
+		t.Fatalf("write out file: %v", err)
+	}
+	rendered := h.renderWasmMainBytesForTest(page, "")
+	hash := h.pageInputHash(page, rendered)
+	h.cache.update(page.OutputName, hash)
+
+	// This call succeeds without consulting wasm-opt at all.
+	if err := h.GeneratePage(page, outDir, &sync.Once{}, topicCodegenData{}); err != nil {
+		t.Fatalf("GeneratePage with DevShaping=true: %v", err)
+	}
+	if data, _ := os.ReadFile(outFile); string(data) != "prebuilt" {
+		t.Errorf("expected prebuilt file untouched on cache hit, got %q", data)
 	}
 }
 
@@ -496,7 +579,7 @@ func TestFileSizeAndFormatBytes(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// wasm_log.go — exercise the printers (they only Printf to stdout)
+// wasm_log.go, exercise the printers (they only Printf to stdout)
 // ---------------------------------------------------------------------------
 
 func TestWasmLogHelpers_DoNotPanic(t *testing.T) {
@@ -585,7 +668,7 @@ func captureStdoutLog(t *testing.T, fn func()) string {
 }
 
 // ---------------------------------------------------------------------------
-// wasm_codec_types.go — typeRef.String + typeRefFromExpr full shapes
+// wasm_codec_types.go, typeRef.String + typeRefFromExpr full shapes
 // ---------------------------------------------------------------------------
 
 func TestTypeRefStringShapes(t *testing.T) {
@@ -649,7 +732,7 @@ func TestTypeRefFromExpr_Unsupported(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// wasm_codec.go — builder funcs that were 0%
+// wasm_codec.go, builder funcs that were 0%
 // ---------------------------------------------------------------------------
 
 func codecTopicFixture() ([]structInfo, map[string]bool) {
@@ -726,7 +809,7 @@ func TestBuildWasmTopicFuncData(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// wasm_topic.go — pure parsers / name helpers that were 0%
+// wasm_topic.go, pure parsers / name helpers that were 0%
 // ---------------------------------------------------------------------------
 
 func TestHasTopicStructs(t *testing.T) {
@@ -972,7 +1055,7 @@ func TestAstTypeString_Shapes(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// wasm_cache.go — cache load/upToDate/update/save round-trip
+// wasm_cache.go, cache load/upToDate/update/save round-trip
 // ---------------------------------------------------------------------------
 
 func TestWasmCache_RoundTrip(t *testing.T) {
@@ -1030,7 +1113,7 @@ func TestWasmCache_SaveNoDirIsSilent(t *testing.T) {
 
 func TestCollectLocalPackageDirs_NilGuards(t *testing.T) {
 	// nil package or empty helperPkgs → nil result without touching disk.
-	if got := collectLocalPackageDirs(nil, nil); got != nil {
+	if got := collectLocalPackageDirs(nil, nil, nil); got != nil {
 		t.Errorf("expected nil for nil package, got %v", got)
 	}
 }
