@@ -186,9 +186,8 @@ func (h *WasmHelper) EnvironWithWarn(warnOnce *sync.Once) []string {
 		"PATH=" + binDir + string(os.PathListSeparator) + binaryenBinDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 	}
 
-	// TinyGo 0.41.1 requires wasm-opt for -opt=s/z. If it's missing from both
-	// the system PATH and the managed tinygo/bin dir, and we haven't managed
-	// to download our own binaryen either, we set WASMOPT=false.
+	// TinyGo needs wasm-opt for -opt=s/z. Look for it on the system PATH, in the
+	// managed tinygo/bin dir, and in our own managed Binaryen.
 	hasWasmOpt := false
 	if _, err := exec.LookPath("wasm-opt"); err == nil {
 		hasWasmOpt = true
@@ -200,13 +199,14 @@ func (h *WasmHelper) EnvironWithWarn(warnOnce *sync.Once) []string {
 		hasWasmOpt = true
 	}
 
-	if !hasWasmOpt {
-		env = append(env, "WASMOPT=false")
-		if warnOnce != nil {
-			warnOnce.Do(func() {
-				wasmWarnf("wasm-opt not found; skipping optimization (WASMOPT=false). Install Binaryen for smaller binaries.")
-			})
-		}
+	// Deliberately no WASMOPT fallback. On the pinned toolchain WASMOPT names the
+	// wasm-opt BINARY, so setting it to "false" hands TinyGo /bin/false, which
+	// exits 1 and fails the build with a message that explains nothing. Leaving
+	// it unset lets TinyGo report the missing tool by name.
+	if !hasWasmOpt && warnOnce != nil {
+		warnOnce.Do(func() {
+			wasmWarnf("wasm-opt not found on PATH and Binaryen could not be downloaded; the WASM build will fail. Install Binaryen (https://github.com/WebAssembly/binaryen/releases) or put wasm-opt on your PATH.")
+		})
 	}
 
 	return env

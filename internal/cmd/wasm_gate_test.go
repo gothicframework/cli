@@ -88,7 +88,7 @@ func writeWasmDigestFile(t *testing.T, d *wasmDigestData) {
 // reports no change. Files must be in place before calling.
 func recordAndSkip(t *testing.T) {
 	t.Helper()
-	recordWasmDigest(nil)
+	recordWasmDigestNow(nil)
 	if wasmInputChanged() {
 		t.Error("wasmInputChanged() = true after recording, want false (no changes)")
 	}
@@ -318,7 +318,7 @@ func (c *Page) ClientSideState() string { return "x" }
 func GetState() string { return "old" }
 `)
 	// Record digest with the local dir in the manifest.
-	recordWasmDigest([]string{helperDir})
+	recordWasmDigestNow([]string{helperDir})
 	if wasmInputChanged() {
 		t.Error("wasmInputChanged() = true after recording with local dir, want false")
 	}
@@ -343,7 +343,7 @@ func TestWasmGate_RecordAfterSuccess_Persists(t *testing.T) {
 
 func (c *Page) ClientSideState() string { return "x" }
 `)
-	recordWasmDigest(nil)
+	recordWasmDigestNow(nil)
 
 	stored := loadWasmDigest()
 	if stored == nil {
@@ -359,7 +359,7 @@ func (c *Page) ClientSideState() string { return "x" }
 func TestWasmGate_BuildWasmAll_NoPages_RecordsDigest(t *testing.T) {
 	scaffoldGateProject(t)
 	// No _templ.go files with ClientSideState.
-	recordWasmDigest(nil)
+	recordWasmDigestNow(nil)
 
 	if wasmInputChanged() {
 		t.Error("wasmInputChanged() = true after no-page record, want false")
@@ -414,7 +414,7 @@ func (c *Page) ClientSideState() string { return "x" }
 
 func Util() string { return "util" }
 `)
-	recordWasmDigest([]string{helperDir})
+	recordWasmDigestNow([]string{helperDir})
 	if wasmInputChanged() {
 		t.Error("wasmInputChanged() = true after recording with local dirs, want false")
 	}
@@ -503,5 +503,61 @@ func TestWasmDigestTracksBuildCache(t *testing.T) {
 
 	if before == after {
 		t.Error("digest ignored a rewritten build cache, so the gate would skip a stage that must run")
+	}
+}
+
+// ── 16. A save landing mid-build must not be recorded as built ────────────
+//
+// The failure this pins is silent and permanent: the stage recorded a digest
+// read after it finished, which already included an edit it never compiled. The
+// next cycle compared against that, saw no change, and skipped the whole stage,
+// so the page kept running the previous logic with nothing in the output saying
+// so. Reproduced for real by editing a page during the 25 s initial rebuild.
+func TestWasmGate_SaveDuringBuild_StillRebuilds(t *testing.T) {
+	scaffoldGateProject(t)
+	page := filepath.Join("src/pages", "counter_templ.go")
+	write := func(body string) {
+		if err := os.WriteFile(page, []byte(body), 0o644); err != nil {
+			t.Fatalf("write page: %v", err)
+		}
+	}
+
+	write("package pages\n\nfunc State() int { return 2 }\n")
+	recordWasmDigestNow(nil)
+
+	// A save arrives, so the next cycle's stage starts and reads the gate.
+	write("package pages\n\nfunc State() int { return 5 }\n")
+	snap := takeWasmInputSnapshot()
+	if !snap.changed {
+		t.Fatal("gate reported no change after an edit, want changed")
+	}
+
+	// The developer saves again while the stage is still compiling.
+	write("package pages\n\nfunc State() int { return 7 }\n")
+
+	// The stage finishes and records what it consumed, not what is on disk now.
+	recordWasmDigestFor(snap, nil)
+
+	if !wasmInputChanged() {
+		t.Error("the save made during the build was recorded as built: the next cycle skips the stage and the binary stays stale")
+	}
+}
+
+// The ordinary path still skips: nothing changed while the build ran, so the
+// snapshot describes exactly what is on disk.
+func TestWasmGate_NoSaveDuringBuild_Skips(t *testing.T) {
+	scaffoldGateProject(t)
+	page := filepath.Join("src/pages", "counter_templ.go")
+	if err := os.WriteFile(page, []byte("package pages\n\nfunc State() int { return 2 }\n"), 0o644); err != nil {
+		t.Fatalf("write page: %v", err)
+	}
+	snap := takeWasmInputSnapshot()
+	if !snap.changed {
+		t.Fatal("gate reported no change on the first cycle, want changed")
+	}
+	recordWasmDigestFor(snap, nil)
+
+	if wasmInputChanged() {
+		t.Error("gate reported a change with nothing touched, want skip")
 	}
 }

@@ -119,6 +119,12 @@ func (proxy *ProxyHelper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/_gothicframework/reload/script.js":
 		w.Header().Add("Content-Type", "text/javascript")
+		// This route answers directly and never reaches modifyResponse, which is
+		// what puts no-store on everything else. Without the header the script has
+		// no Cache-Control, no ETag and no Last-Modified, so a browser is free to
+		// keep a copy from an older CLI: the developer upgrades, and the tab goes
+		// on running the previous dev script with no way to tell.
+		w.Header().Set("Cache-Control", "no-store, must-revalidate")
 		_, err := io.WriteString(w, reloadScriptJS)
 		if err != nil {
 			output.Errorln("cannot write the reload script: %v", err)

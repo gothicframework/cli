@@ -929,3 +929,23 @@ func TestStreamAdvertisesRetryInterval(t *testing.T) {
 		t.Errorf("stream opened with %q, want a retry hint first", got)
 	}
 }
+
+// The reload script answers on its own route, short-circuiting modifyResponse,
+// which is what puts no-store on every other dev response. Without an explicit
+// header it ships with no Cache-Control, no ETag and no Last-Modified, leaving a
+// browser free to keep a copy from an older CLI: the developer upgrades and the
+// tab keeps running the previous dev script with nothing saying so.
+func TestReloadScriptIsNeverCached(t *testing.T) {
+	proxy := NewProxyHelper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/_gothicframework/reload/script.js", nil)
+
+	proxy.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Cache-Control"); !strings.Contains(got, "no-store") {
+		t.Errorf("Cache-Control = %q, want it to contain no-store", got)
+	}
+	if !strings.Contains(rec.Body.String(), "__gothic_badge") {
+		t.Error("served reload script is missing the build badge")
+	}
+}

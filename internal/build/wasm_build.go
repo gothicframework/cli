@@ -239,17 +239,14 @@ func (h *WasmHelper) buildCommandForCompiler(choice WasmCompilerChoice, pkg, abs
 		cmd := exec.Command(tinygo, tinygoBuildArgs(absOutFile, pkg)...)
 		cmd.Dir = tempModDir
 		cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
-		hasWasmOpt := false
-		if _, err := exec.LookPath("wasm-opt"); err == nil {
-			hasWasmOpt = true
-		} else if b := h.BinaryenBinary(); b != "" {
-			if _, err := os.Stat(b); err == nil {
-				hasWasmOpt = true
-				cmd.Env = append(cmd.Env, "PATH="+filepath.Dir(b)+string(os.PathListSeparator)+os.Getenv("PATH"))
+		// Put the managed Binaryen on PATH when the system has none, so TinyGo's
+		// -opt=z can find wasm-opt. No WASMOPT fallback: see EnvironWithWarn.
+		if _, err := exec.LookPath("wasm-opt"); err != nil {
+			if b := h.BinaryenBinary(); b != "" {
+				if _, err := os.Stat(b); err == nil {
+					cmd.Env = append(cmd.Env, "PATH="+filepath.Dir(b)+string(os.PathListSeparator)+os.Getenv("PATH"))
+				}
 			}
-		}
-		if !hasWasmOpt {
-			cmd.Env = append(cmd.Env, "WASMOPT=false")
 		}
 		return cmd, nil
 
@@ -335,9 +332,47 @@ func compilerLabel(c WasmCompilerChoice) string {
 	}
 }
 
-// CountTopicManagers returns the number of topic structs that will produce a
-// topic-manager WASM binary (i.e. structs that have a KeyName set).
-func (h *WasmHelper) CountTopicManagers() int {
+// pruneOrphanArtifacts deletes compiled artifacts in outDir, and their cache
+// entries, that no page in this build produces. Removing a ClientSideState
+// block, or the page file itself, otherwise leaves its binary on disk forever,
+// and `gothic deploy` uploads the whole public/ tree, so a dead artifact keeps
+// shipping to the CDN. Safe because every caller scans the whole project:
+// `gothic wasm`, `gothic deploy` and the hot-reload stage all pass the complete
+// page set.
+func (h *WasmHelper) pruneOrphanArtifacts(pages []WasmPage, outDir string) {
+	live := make(map[string]bool, len(pages))
+	for _, p := range pages {
+		live[p.OutputName] = true
+	}
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		base, ok := strings.CutSuffix(e.Name(), ".wasm.gz")
+		if !ok {
+			base, ok = strings.CutSuffix(e.Name(), ".wasm.br")
+		}
+		if !ok || live[base] {
+			continue
+		}
+		if err := os.Remove(filepath.Join(outDir, e.Name())); err == nil {
+			wasmLogf("removed stale artifact %s", wasmPath(e.Name()))
+		}
+	}
+	if h.cache != nil {
+		h.cache.prune(live)
+	}
+}
+
+// CountTopics returns the number of declared topics (topic structs carrying a
+// binary key). Topics compile no binary of their own: the always-loaded static
+// core is the generic hub, so this is an inventory of declarations, not of
+// build units.
+func (h *WasmHelper) CountTopics() int {
 	_, structs, _, _ := h.collectTopicSnippets()
 	n := 0
 	for _, s := range structs {
@@ -426,6 +461,8 @@ func (h *WasmHelper) GenerateAll(pages []WasmPage, outDir string) error {
 	if err := g.Wait(); err != nil {
 		return err
 	}
+
+	h.pruneOrphanArtifacts(pages, outDir)
 
 	up := h.counts.upToDate.Load()
 	built := h.counts.built.Load()

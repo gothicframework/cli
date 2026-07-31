@@ -741,3 +741,42 @@ func TestPageInputHash_CompilerInvalidates(t *testing.T) {
 		t.Error("TinyGo and Go compilers produce the same hash")
 	}
 }
+
+// A page that loses its ClientSideState, or is deleted outright, must not leave
+// its binary behind: `gothic deploy` uploads the whole public/ tree, so a stale
+// artifact keeps being served long after nothing references it.
+func TestPruneOrphanArtifacts(t *testing.T) {
+	outDir := t.TempDir()
+	write := func(name string) string {
+		p := filepath.Join(outDir, name)
+		if err := os.WriteFile(p, []byte("x"), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		return p
+	}
+	live := write("counter.wasm.br")
+	liveGz := write("index.wasm.gz")
+	orphanBr := write("deleted.wasm.br")
+	orphanGz := write("removed.wasm.gz")
+	keep := write("notes.txt")
+
+	h := DefaultWasmHelper()
+	h.cache = &wasmCache{hashes: map[string]string{
+		"counter": "a", "index": "b", "deleted": "c", "topic-old": "d",
+	}}
+	h.pruneOrphanArtifacts([]WasmPage{{OutputName: "counter"}, {OutputName: "index"}}, outDir)
+
+	for _, p := range []string{live, liveGz, keep} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected %s to survive: %v", filepath.Base(p), err)
+		}
+	}
+	for _, p := range []string{orphanBr, orphanGz} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("expected %s to be pruned", filepath.Base(p))
+		}
+	}
+	if len(h.cache.hashes) != 2 || h.cache.hashes["counter"] != "a" || h.cache.hashes["index"] != "b" {
+		t.Errorf("cache not pruned to the live set: %v", h.cache.hashes)
+	}
+}

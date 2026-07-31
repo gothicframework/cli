@@ -120,11 +120,11 @@ func TestPregenerateTopicStubs(t *testing.T) {
 	}
 }
 
-func TestCountTopicManagers(t *testing.T) {
+func TestCountTopics(t *testing.T) {
 	setupTopicProject(t)
 	h := DefaultWasmHelper()
-	if n := h.CountTopicManagers(); n != 1 {
-		t.Errorf("CountTopicManagers: got %d, want 1", n)
+	if n := h.CountTopics(); n != 1 {
+		t.Errorf("CountTopics: got %d, want 1", n)
 	}
 }
 

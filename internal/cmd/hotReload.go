@@ -543,6 +543,18 @@ func (command *HotReloadCommand) rebuild() {
 		command.phase("Stopping previous go run process...")
 		command.runCancel()
 		command.runCancel = nil
+		// Wait for the old process to actually exit before binding again.
+		// Cancelling only delivers SIGTERM, so without this the new server races
+		// the old listener and loses with "address already in use", dies, and the
+		// session serves nothing until the next save. The grace matches
+		// runCmd.WaitDelay, which force-kills anything that hangs.
+		if command.runDone != nil {
+			select {
+			case <-command.runDone:
+			case <-time.After(5 * time.Second):
+			}
+			command.runDone = nil
+		}
 	}
 	command.phase("Running app...")
 	ctx, cancel := context.WithCancel(command.processCtx())
@@ -601,8 +613,11 @@ func (command *HotReloadCommand) notifyReload(addr string, budget time.Duration)
 }
 
 func (command *HotReloadCommand) buildWasmAll() (int, error) {
-	// Gate: skip the whole stage when no input file has changed.
-	if !wasmInputChanged() {
+	// Gate: skip the whole stage when no input file has changed. The snapshot is
+	// taken here, before anything is read, and is what gets recorded on success,
+	// so a save landing mid-build is not mistaken for content this build compiled.
+	snap := takeWasmInputSnapshot()
+	if !snap.changed {
 		return 0, nil
 	}
 
@@ -625,7 +640,7 @@ func (command *HotReloadCommand) buildWasmAll() (int, error) {
 		}
 	}
 	if len(pages) == 0 {
-		recordWasmDigest(nil)
+		recordWasmDigestFor(snap, nil)
 		return 0, nil
 	}
 	var nPages, nComponents int
@@ -636,7 +651,7 @@ func (command *HotReloadCommand) buildWasmAll() (int, error) {
 			nPages++
 		}
 	}
-	topics := command.cli.Wasm.CountTopicManagers()
+	topics := command.cli.Wasm.CountTopics()
 	// Only the first build of the session gets the inventory line. On a rebuild
 	// almost everything is cached, so announcing the full count would suggest
 	// work that is not happening.
@@ -644,7 +659,7 @@ func (command *HotReloadCommand) buildWasmAll() (int, error) {
 		wasmLogf("building %s, %s, %s...",
 			wasmCount(nPages, "page(s)"),
 			wasmCount(nComponents, "component(s)"),
-			wasmCount(topics, "topic manager(s)"))
+			wasmCount(topics, "topic(s)"))
 		command.wasmInventoryShown = true
 	}
 	if err := command.cli.Wasm.GenerateAll(pages, "public/wasm"); err != nil {
@@ -652,9 +667,10 @@ func (command *HotReloadCommand) buildWasmAll() (int, error) {
 		return 0, err
 	}
 
-	// Persist digest only after a successful build. The local package dirs
-	// come from the scan that just completed.
-	recordWasmDigest(collectWasmLocalDirs(pages))
+	// Persist only after a successful build, and persist the pre-build snapshot:
+	// see recordWasmDigestFor for why a fresh reading here would strand a stale
+	// binary. The local package dirs come from the scan that just completed.
+	recordWasmDigestFor(snap, collectWasmLocalDirs(pages))
 	return int(command.cli.Wasm.RebuiltCount()), nil
 }
 

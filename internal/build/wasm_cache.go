@@ -48,6 +48,18 @@ func (c *wasmCache) update(name, hash string) {
 	c.hashes[name] = hash
 }
 
+// prune drops entries whose target no longer exists, so the hash of a deleted
+// page cannot keep a stale artifact looking up to date.
+func (c *wasmCache) prune(live map[string]bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for name := range c.hashes {
+		if !live[name] {
+			delete(c.hashes, name)
+		}
+	}
+}
+
 func (c *wasmCache) save() {
 	c.mu.Lock()
 	data, err := json.MarshalIndent(c.hashes, "", "  ")

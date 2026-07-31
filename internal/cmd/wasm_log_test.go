@@ -57,7 +57,7 @@ func TestWasmCount(t *testing.T) {
 }
 
 func TestWasmCountZero(t *testing.T) {
-	got := wasmCount(0, "topic manager(s)")
+	got := wasmCount(0, "topic(s)")
 	if !strings.Contains(got, "0") {
 		t.Errorf("wasmCount(0) missing zero: %q", got)
 	}

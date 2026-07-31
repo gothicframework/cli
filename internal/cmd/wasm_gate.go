@@ -45,22 +45,78 @@ type wasmDigestData struct {
 	LocalPackageDirs []string `json:"localPackageDirs,omitempty"`
 }
 
-// wasmInputChanged returns true when any WASM-stage input has changed since the
-// last recorded successful build. Fail-open: on any error the stage runs.
-func wasmInputChanged() bool {
-	stored := loadWasmDigest()
-	if stored == nil {
-		return true
-	}
-	current := computeWasmDigest(stored.LocalPackageDirs)
-	return current != stored.Digest
+// wasmInputSnapshot is the gate reading taken BEFORE a build: the digest of the
+// inputs the build is about to consume, the dirs it was computed over, and
+// whether it differs from the last recorded build.
+type wasmInputSnapshot struct {
+	digest  string
+	dirs    []string
+	changed bool
 }
 
-// recordWasmDigest persists a new digest after a successful WASM build.
-// Errors are silently ignored; the next cycle runs the stage.
-func recordWasmDigest(localDirs []string) {
+// takeWasmInputSnapshot reads the gate. Fail-open: on any error the stage runs.
+func takeWasmInputSnapshot() wasmInputSnapshot {
+	stored := loadWasmDigest()
+	if stored == nil {
+		return wasmInputSnapshot{changed: true}
+	}
+	current := computeWasmDigest(stored.LocalPackageDirs)
+	return wasmInputSnapshot{
+		digest:  current,
+		dirs:    stored.LocalPackageDirs,
+		changed: current != stored.Digest,
+	}
+}
+
+// wasmInputChanged reports whether any WASM-stage input changed since the last
+// recorded build, for callers that only read the gate and never record.
+func wasmInputChanged() bool {
+	return takeWasmInputSnapshot().changed
+}
+
+// recordWasmDigestNow records a digest read at call time. A build stage must NOT
+// use this: it cannot tell a file the build compiled from one saved while it ran.
+// Use recordWasmDigestFor there.
+func recordWasmDigestNow(localDirs []string) {
+	writeWasmDigest(computeWasmDigest(localDirs), localDirs)
+}
+
+// recordWasmDigestFor persists the digest of what the build actually consumed.
+//
+// It records the snapshot taken BEFORE the build, not a fresh reading. A save
+// landing while the stage is running is the whole reason: recomputing here would
+// store a digest describing content this build never compiled, and the next
+// cycle would compare against it, see no change, and skip the stage forever,
+// leaving a stale binary with no output saying so. Measured: an edit made during
+// the 25 s initial rebuild left the page running the previous logic until an
+// unrelated file was touched.
+//
+// A changed local-package set is the one case that has to recompute: the
+// snapshot was taken over a different file set, so it does not describe these
+// inputs either. That costs one extra rebuild, which is the safe direction.
+func recordWasmDigestFor(snap wasmInputSnapshot, localDirs []string) {
+	digest := snap.digest
+	if digest == "" || !sameDirs(snap.dirs, localDirs) {
+		digest = computeWasmDigest(localDirs)
+	}
+	writeWasmDigest(digest, localDirs)
+}
+
+func sameDirs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func writeWasmDigest(digest string, localDirs []string) {
 	d := wasmDigestData{
-		Digest:           computeWasmDigest(localDirs),
+		Digest:           digest,
 		LocalPackageDirs: localDirs,
 	}
 	if err := os.MkdirAll(filepath.Dir(wasmDigestPath), 0o755); err != nil {

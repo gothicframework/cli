@@ -20,3 +20,5 @@ coverage.out
 /internal/cmd/src/
 /internal/build/tmp/
 /internal/build/src/
+/internal/cmd/.gothicCli/
+/internal/build/.gothicCli/

@@ -72,74 +72,39 @@
     }
 
     // building, WASM compilation started (payload: project-relative file path)
-    // The state is kept on window because the paint reload replaces the whole
-    // document while the compile is still running; without it the page looks
-    // finished for the two or three seconds it is still on the old binary.
+    // The paint reload navigates away while the compile is still running, so the
+    // badge is re-established from the server's replayed state on reconnect.
     src.addEventListener("building", function(ev) {
-        delete window.__gothic_buildError;
-        window.__gothic_building = ev.data || "Compiling...";
-        showBadge("building", window.__gothic_building);
+        showBadge("building", ev.data || "Compiling...");
     });
 
     // builddone, the WASM stage settled with no error. Sent whether or not any
     // unit was rebuilt, and always before the reload that carries a fresh
     // binary, so the swapped-in document starts clean.
     src.addEventListener("builddone", function() {
-        delete window.__gothic_building;
-        delete window.__gothic_buildError;
         hideBadge();
     });
 
     // builderror, compilation failed (payload: error message)
     src.addEventListener("builderror", function(ev) {
-        let msg = ev.data || "Unknown build error";
-        delete window.__gothic_building;
-        window.__gothic_buildError = msg;
-        showBadge("failed", msg);
+        showBadge("failed", ev.data || "Unknown build error");
     });
 
-    // message, "reload" (fresh binary ready, swap the page)
+    // message, "reload" (fresh binary ready, navigate to the new document)
     //           or keepalive "ping" (filtered by data guard below)
-    src.addEventListener("message", async function(ev) {
+    src.addEventListener("message", function(ev) {
         if (!ev || ev.data !== "reload") return;
 
         // Close SSE before navigating so the server-side slot is freed immediately.
         src.close();
         window.gothicframework_reloadSrc = null;
 
-        try {
-            const res = await fetch(window.location.href, { cache: "no-store" });
-            if (!res.ok) throw new Error("HTTP " + res.status);
-            const html = await res.text();
-
-            // Clear WASM globals so new modules start from a clean registry.
-            delete window.__gothic_registry;
-            delete window.__gothic_proxied;
-            delete window.__gothicCurrentModule;
-
-            // Replace the entire document with the freshly fetched HTML.
-            // document.open/write/close forces the browser to re-request all
-            // linked resources (CSS, JS) as if it were a brand-new page load.
-            document.open("text/html", "replace");
-            document.write(html);
-            document.close();
-        } catch(e) {
-            // Fallback if fetch fails or returns a non-OK status (server still restarting).
-            window.location.reload();
-        }
+        // A navigation, not a document swap: the browser holds the current paint
+        // until the new document has its stylesheet, so the page never appears
+        // unstyled. Writing into document.open destroyed the document and painted
+        // whatever had parsed, ahead of the CSS, which showed as a one-frame flash.
+        window.location.reload();
     });
-
-    // Re-establish the badge after document.write. The reload handler destroys
-    // the entire DOM, but the window object survives the swap, so the pending
-    // state is still here. An error takes precedence over a running build.
-    // This is the case that matters most: the paint reload lands while the
-    // compile is still going, and without this the page looks done while it is
-    // still running the previous binary.
-    if (window.__gothic_buildError) {
-        showBadge("failed", window.__gothic_buildError);
-    } else if (window.__gothic_building) {
-        showBadge("building", window.__gothic_building);
-    }
 
     window.gothicframework_reloadSrc = src;
     window.onbeforeunload = function() { src.close(); };
