@@ -16,13 +16,10 @@ type wasmBuildCounts struct {
 }
 
 // tinyGoVersion is the default TinyGo toolchain (overridable via
-// WasmTinyGoVersion). A -gothic.<n> suffix means a build of github.com/tinygo-org/tinygo/pull/5545
-// that upstream has not released yet, downloaded from the fork rather than from
-// tinygo-org; see wasm_binary.go and docs/patched-tinygo-channel.md. It carries the
-// syscall/js finalizers, the idle-point finalizer-pressure GC that drains them, and
-// the per-block registration bitmap that keeps registering one O(1). Swap this for
-// the plain upstream version the moment a release contains that work.
-const tinyGoVersion = "0.42.0-gothic.4"
+// WasmTinyGoVersion). TinyGo 0.42.0 includes the syscall/js finalizers,
+// idle-point finalizer-pressure GC, asyncify stack cleanup, and per-block
+// registration bitmap from upstream PR #5545.
+const tinyGoVersion = "0.42.0"
 const binaryenVersion = "117"
 
 // ResolveTinyGoVersion returns the effective TinyGo toolchain version for a

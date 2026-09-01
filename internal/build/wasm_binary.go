@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,20 +33,21 @@ const (
 )
 
 // TinyGo release hosts. Official builds come from the upstream org; Gothic's
-// patched builds (a fix that is MERGED upstream but not yet in an official
-// release) are hosted on the maintainer's fork under the same release-asset
-// naming as upstream. See cli/docs/patched-tinygo-channel.md.
+// patched builds carry a fix not yet available in an official release and use
+// the same release-asset naming on the maintainer's fork. See
+// cli/docs/patched-tinygo-channel.md.
 const (
 	tinyGoUpstreamReleases = "https://github.com/tinygo-org/tinygo/releases/download"
 	tinyGoForkReleases     = "https://github.com/felipegenef/tinygo/releases/download"
+	tinyGoUpstreamAPI      = "https://api.github.com/repos/tinygo-org/tinygo/releases/tags"
 )
 
 // gothicPatchedVersion matches Gothic's patched-TinyGo version convention:
 // <semver>-gothic.<n> (e.g. "0.41.1-gothic.1"). A version matching this pattern
 // is downloaded from the fork; every other version comes from upstream. The
 // convention is the ONLY routing signal — nothing is hardcoded to a specific
-// patch — so a future 0.42.0-gothic.3 routes to the fork automatically while a
-// bare official 0.42.0 stays on upstream.
+// patch — so a future 0.43.0-gothic.1 routes to the fork automatically while a
+// bare official 0.43.0 stays on upstream.
 var gothicPatchedVersion = regexp.MustCompile(`^\d+\.\d+\.\d+-gothic\.\d+$`)
 
 // tinyGoReleaseBaseURL returns the GitHub "releases/download" base the TinyGo
@@ -348,14 +350,20 @@ func (h *WasmHelper) ensureTinyGo() error {
 
 	base := tinyGoReleaseBaseURL(h.Version)
 	archiveURL := fmt.Sprintf("%s/v%s/%s", base, h.Version, archiveName)
-	checksumURL := fmt.Sprintf("%s/v%s/checksums.txt", base, h.Version)
 
 	fmt.Fprintf(os.Stderr, "wasm: TinyGo %s not found — downloading for %s/%s...\n",
 		h.Version, h.Runtime, h.Arch)
 
-	expected, checksumErr := h.fetchExpectedChecksum(checksumURL, archiveName)
-	if checksumErr != nil {
-		return fmt.Errorf("wasm: verifying TinyGo toolchain: checksums.txt unavailable: %w (refusing to install an unverified toolchain)", checksumErr)
+	var expected string
+	if gothicPatchedVersion.MatchString(h.Version) {
+		checksumURL := fmt.Sprintf("%s/v%s/checksums.txt", base, h.Version)
+		expected, err = h.fetchExpectedChecksum(checksumURL, archiveName)
+	} else {
+		releaseURL := fmt.Sprintf("%s/v%s", tinyGoUpstreamAPI, h.Version)
+		expected, err = h.fetchReleaseAssetDigest(releaseURL, archiveName)
+	}
+	if err != nil {
+		return fmt.Errorf("wasm: verifying TinyGo toolchain: %w (refusing to install an unverified toolchain)", err)
 	}
 
 	tmpArchive, err := h.downloadToTemp(archiveURL)
@@ -494,6 +502,44 @@ func (h *WasmHelper) fetchExpectedChecksum(checksumURL, filename string) (string
 		return "", fmt.Errorf("scan checksums: %w", err)
 	}
 	return "", fmt.Errorf("checksum not found for %q", filename)
+}
+
+func (h *WasmHelper) fetchReleaseAssetDigest(releaseURL, filename string) (string, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, releaseURL, nil) //nolint:noctx
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d fetching release metadata", resp.StatusCode)
+	}
+
+	var release struct {
+		Assets []struct {
+			Name   string `json:"name"`
+			Digest string `json:"digest"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return "", fmt.Errorf("decode release metadata: %w", err)
+	}
+	for _, asset := range release.Assets {
+		if asset.Name != filename {
+			continue
+		}
+		const prefix = "sha256:"
+		if !strings.HasPrefix(asset.Digest, prefix) || len(asset.Digest) != len(prefix)+sha256.Size*2 {
+			return "", fmt.Errorf("release asset %q has no valid SHA-256 digest", filename)
+		}
+		return strings.TrimPrefix(asset.Digest, prefix), nil
+	}
+	return "", fmt.Errorf("release asset not found for %q", filename)
 }
 
 func (h *WasmHelper) verifyChecksum(filePath, expected string) error {

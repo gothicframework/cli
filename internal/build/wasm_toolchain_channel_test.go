@@ -20,7 +20,7 @@ func TestTinyGoReleaseBaseURL_RoutesPatchedToFork(t *testing.T) {
 		{"0.42.0-gothic.3", tinyGoForkReleases},
 		{"0.41.1-gothic.12", tinyGoForkReleases},
 		// Near-misses that must NOT route to the fork.
-		{"0.41.1-gothic", tinyGoUpstreamReleases},   // missing .<n>
+		{"0.41.1-gothic", tinyGoUpstreamReleases},    // missing .<n>
 		{"0.41.1-gothic.1a", tinyGoUpstreamReleases}, // non-numeric suffix
 		{"0.41.1-beta.1", tinyGoUpstreamReleases},    // different prerelease
 		{"gothic.1", tinyGoUpstreamReleases},         // no base semver
@@ -30,5 +30,14 @@ func TestTinyGoReleaseBaseURL_RoutesPatchedToFork(t *testing.T) {
 		if got := tinyGoReleaseBaseURL(c.version); got != c.want {
 			t.Errorf("tinyGoReleaseBaseURL(%q) = %q, want %q", c.version, got, c.want)
 		}
+	}
+}
+
+func TestDefaultTinyGoVersionUsesOfficialRelease(t *testing.T) {
+	if got := ResolveTinyGoVersion(""); got != "0.42.0" {
+		t.Fatalf("ResolveTinyGoVersion(\"\") = %q, want %q", got, "0.42.0")
+	}
+	if got := tinyGoReleaseBaseURL(ResolveTinyGoVersion("")); got != tinyGoUpstreamReleases {
+		t.Fatalf("default TinyGo release base = %q, want upstream %q", got, tinyGoUpstreamReleases)
 	}
 }

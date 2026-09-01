@@ -84,6 +84,19 @@ func TestGeneratePage_BuildRecipeChangeInvalidatesCache(t *testing.T) {
 	}
 }
 
+func TestGeneratePage_ToolchainVersionChangeInvalidatesCache(t *testing.T) {
+	h := DefaultWasmHelper()
+	page := WasmPage{OutputName: "counter", Compression: WasmCompressionGzip}
+	rendered := []byte("package main\nfunc main() {}\n")
+
+	before := h.pageInputHash(page, rendered)
+	h.Version = "0.42.1"
+	after := h.pageInputHash(page, rendered)
+	if after == before {
+		t.Fatal("expected pageInputHash to change after the TinyGo version changed")
+	}
+}
+
 // When the rendered main.go content changes (e.g. a FuncBody edit), pageInputHash
 // must differ from the cached hash so the build is NOT skipped.
 func TestGeneratePage_RenderedBodyChangeInvalidatesCache(t *testing.T) {

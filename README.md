@@ -272,4 +272,4 @@ The framework's design records ship with the [`core`](https://github.com/gothicf
 
 ## Maintainer docs
 
-- [`docs/patched-tinygo-channel.md`](docs/patched-tinygo-channel.md) — routing Gothic to a patched TinyGo build (a fix merged upstream but not yet released), the `‹base›-gothic.‹n›` version convention, the safe-by-default runtime capability profile, and how to cut and retire a patched release.
+- [`docs/patched-tinygo-channel.md`](docs/patched-tinygo-channel.md) — routing Gothic temporarily to a patched TinyGo build, the `‹base›-gothic.‹n›` version convention, and how to cut and retire a patched release.

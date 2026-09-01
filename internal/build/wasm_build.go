@@ -213,13 +213,13 @@ var (
 	goWasmEnv       = []string{"GOOS=js", "GOARCH=wasm"}
 )
 
-// buildRecipeFingerprint returns a stable string identifying every compiler's build
-// recipe. It is folded into the per-page and per-topic input hashes so a flag-only
-// change (no runtime .go source change) still invalidates the cache and forces a
-// rebuild. It intentionally covers all recipes, not just the page's chosen one:
-// over-invalidating (rebuilding) is the safe direction.
-func buildRecipeFingerprint() string {
-	return "tinygo:" + strings.Join(tinygoWasmFlags, " ") +
+// buildRecipeFingerprint returns a stable string identifying every compiler's
+// build recipe and managed toolchain version. It intentionally covers all
+// recipes, not just the page's chosen one: over-invalidating is safe, while
+// reusing output from an older compiler is not.
+func (h *WasmHelper) buildRecipeFingerprint() string {
+	return "tinygo:" + h.Version + " " + strings.Join(tinygoWasmFlags, " ") +
+		"|binaryen:" + h.BinaryenVersion +
 		"|go:" + strings.Join(goWasmFlags, " ") + " " + strings.Join(goWasmEnv, " ")
 }
 

@@ -101,7 +101,7 @@ func (h *WasmHelper) pageInputHash(page WasmPage, renderedMain []byte) string {
 	// Fold the compiler build recipe (flags) into the hash so a flag-only change —
 	// e.g. the -gc conservative switch, invalidates the cache even when no runtime
 	// .go source changed.
-	io.WriteString(hh, buildRecipeFingerprint())
+	io.WriteString(hh, h.buildRecipeFingerprint())
 	hh.Write([]byte{byte(page.Compression)})
 	hh.Write([]byte{byte(page.Compiler)})
 	// Fold Multiplexed into the hash so toggling it regenerates main()
@@ -180,7 +180,7 @@ func (h *WasmHelper) topicManagerInputHash(s structInfo) string {
 	}
 	h.feedEmbeddedTemplate(hh, tmplTopicManagerMain)
 	h.feedRuntimeFS(hh)
-	io.WriteString(hh, buildRecipeFingerprint())
+	io.WriteString(hh, h.buildRecipeFingerprint())
 	hh.Write([]byte(s.Name))
 	hh.Write([]byte{byte(s.Compression)})
 	hh.Write([]byte{byte(s.Compiler)})

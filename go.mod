@@ -14,8 +14,9 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gen2brain/webp v0.6.4
-	github.com/gothicframework/components v1.3.0-beta.6
-	github.com/gothicframework/core v1.6.0-beta.13
+	github.com/go-chi/chi/v5 v5.2.5
+	github.com/gothicframework/components v1.3.0
+	github.com/gothicframework/core v1.6.0
 	github.com/hashicorp/terraform-exec v0.25.2
 	github.com/joho/godotenv v1.5.1
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
@@ -65,7 +66,6 @@ require (
 	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/fatih/color v1.17.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/go-chi/chi/v5 v5.2.5 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
