@@ -110,8 +110,11 @@ type Manager struct {
 
 	// pinned is the device-metrics override SetViewport armed on the page
 	// (nil = the browser's own window size). It outlives navigations and is
-	// re-applied on every relaunch; ClearViewport lifts it.
-	pinned *proto.EmulationSetDeviceMetricsOverride
+	// re-applied on every relaunch; ClearViewport lifts it. restoreBounds
+	// holds the headful window's pre-pin geometry so the clear path hands
+	// the window back the way the maintainer had it.
+	pinned        *proto.EmulationSetDeviceMetricsOverride
+	restoreBounds *proto.BrowserBounds
 
 	// console is the retained page-console ring (see console.go); consoleMu
 	// guards it.
@@ -298,6 +301,9 @@ func (m *Manager) launchLocked() (*rod.Page, error) {
 	// browser down; the pin stays armed for the next relaunch.
 	if m.pinned != nil {
 		_ = m.pinned.Call(page)
+		// The headful window that just relaunched also gets the pin's
+		// geometry, so the emulation fills the window again.
+		m.matchWindowToViewport(page, m.pinned.Width, m.pinned.Height)
 	}
 
 	// Retain the page's console errors/warnings for the audit and logs tools.
@@ -463,9 +469,54 @@ func (m *Manager) SetViewport(width, height int, mobile bool) error {
 	if err := ovr.Call(page); err != nil {
 		return fmt.Errorf("pin viewport %dx%d: %w", width, height, err)
 	}
+	// Capture the pre-pin window geometry so ClearViewport can put the
+	// maintainer's window back, then make the window fill the emulation.
+	if m.pinned == nil && !m.opts.Headless {
+		if info, err := (proto.BrowserGetWindowForTarget{}).Call(page); err == nil {
+			m.restoreBounds = info.Bounds
+		}
+	}
+	m.matchWindowToViewport(page, width, height)
 	m.pinned = &ovr
 	m.armIdleLocked()
 	return nil
+}
+
+// matchWindowToViewport resizes a HEADFUL window so the emulated viewport
+// fills it. CDP's device-metrics override renders the page at the pinned
+// size inside whatever window exists; without this the maintainer sees the
+// page canvas shrunk into a corner of a much larger window and empty space
+// everywhere else — it reads as a broken layout but is emulation geometry.
+// The window frame (title/URL bars) sits outside the viewport, so the outer
+// bounds start from an estimate and a correction pass reads the real
+// innerWidth/innerHeight and adjusts; two passes bound the loop. Best
+// effort: a failure leaves the emulation pinned and the window as it was.
+func (m *Manager) matchWindowToViewport(page *rod.Page, width, height int) {
+	if m.opts.Headless {
+		return
+	}
+	const initialFrameAllowance = 160
+	outerW, outerH := width, height+initialFrameAllowance
+	for pass := 0; pass < 2; pass++ {
+		info, err := (proto.BrowserGetWindowForTarget{}).Call(page)
+		if err != nil {
+			return
+		}
+		bounds := &proto.BrowserBounds{Width: &outerW, Height: &outerH, WindowState: proto.BrowserWindowStateNormal}
+		if err := (proto.BrowserSetWindowBounds{WindowID: info.WindowID, Bounds: bounds}).Call(page); err != nil {
+			return
+		}
+		dims, err := viewportDims(page)
+		if err != nil {
+			return
+		}
+		outerW += width - int(dims[0])
+		outerH += height - int(dims[1])
+		dw, dh := width-int(dims[0]), height-int(dims[1])
+		if dw >= -1 && dw <= 1 && dh >= -1 && dh <= 1 {
+			return
+		}
+	}
 }
 
 // ClearViewport lifts a pinned override and restores the browser's own window
@@ -479,8 +530,16 @@ func (m *Manager) ClearViewport() error {
 		if err := m.page.SetViewport(nil); err != nil {
 			return fmt.Errorf("clear viewport: %w", err)
 		}
+		// Headful sessions gave the window to the emulation (the pin
+		// resized it); hand the maintainer's window geometry back.
+		if !m.opts.Headless && m.restoreBounds != nil {
+			if info, err := (proto.BrowserGetWindowForTarget{}).Call(m.page); err == nil {
+				_ = (proto.BrowserSetWindowBounds{WindowID: info.WindowID, Bounds: m.restoreBounds}).Call(m.page)
+			}
+		}
 		m.armIdleLocked()
 	}
 	m.pinned = nil
+	m.restoreBounds = nil
 	return nil
 }
