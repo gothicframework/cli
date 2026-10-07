@@ -8,7 +8,10 @@
 // is silently ignored. The only hard error is an unknown ENV builder function.
 //
 // GoModName is NOT read from gothic.config.go; it is read from go.mod in
-// projectRoot via golang.org/x/mod/modfile.
+// projectRoot via golang.org/x/mod/modfile. The same file also supplies
+// Config.FrameworkModules: the require lines for github.com/gothicframework/*
+// (the published library pins — under a workspace with replace directives,
+// `go list -m` reports local checkouts, so mf.Require is the version truth).
 package astconfig
 
 import (
@@ -18,7 +21,9 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 
 	"golang.org/x/mod/modfile"
 
@@ -123,7 +128,36 @@ func Parse(projectRoot string) (*cli.Config, error) {
 		cfg.GoModName = mf.Module.Mod.Path
 	}
 
+	// Framework module pins from the go.mod require lines. Only published
+	// framework libraries (github.com/gothicframework/*) are recorded; the
+	// entries are sorted by module path for deterministic output.
+	for _, req := range mf.Require {
+		if !isFrameworkModulePath(req.Mod.Path) {
+			continue
+		}
+		cfg.FrameworkModules = append(cfg.FrameworkModules, cli.FrameworkModule{
+			Path:    req.Mod.Path,
+			Version: req.Mod.Version,
+		})
+	}
+	if len(cfg.FrameworkModules) > 1 {
+		sort.Slice(cfg.FrameworkModules, func(i, j int) bool {
+			return cfg.FrameworkModules[i].Path < cfg.FrameworkModules[j].Path
+		})
+	}
+
 	return cfg, nil
+}
+
+// gothicModulePathPrefix is the org every published Gothic library lives under
+// (core, components, middlewares — and any future one). Only requires inside
+// this org count as framework-module pins.
+const gothicModulePathPrefix = "github.com/gothicframework/"
+
+// isFrameworkModulePath reports whether a go.mod require path belongs to a
+// published Gothic library (github.com/gothicframework/<lib>[...]).
+func isFrameworkModulePath(path string) bool {
+	return strings.HasPrefix(path, gothicModulePathPrefix)
 }
 
 func parseDeploy(fset *token.FileSet, v ast.Expr) (*cli.DeployConfig, error) {

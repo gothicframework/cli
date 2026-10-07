@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -947,5 +949,136 @@ func TestReloadScriptIsNeverCached(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "__gothic_badge") {
 		t.Error("served reload script is missing the build badge")
+	}
+}
+
+// ── Dev bus endpoint (POST ingest / GET read) ──
+
+// busPostOne POSTs a single record wrapped in the {"records":[...]} batch
+// shape the dev script's observer sends.
+func busPostOne(proxy ProxyHelper, record string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/_gothicframework/reload/bus",
+		strings.NewReader(`{"records":[`+record+`]}`))
+	rec := httptest.NewRecorder()
+	proxy.ServeHTTP(rec, req)
+	return rec
+}
+
+// TestServeHTTP_BusPostThenGetNewestFirst covers the endpoint round trip:
+// ingest preserves the record shape, GET returns them newest-first with the
+// ?last= window applied.
+func TestServeHTTP_BusPostThenGetNewestFirst(t *testing.T) {
+	proxy := NewProxyHelper()
+
+	rec := busPostOne(proxy,
+		`{"t":1,"kind":"topic","dir":"pub","event":"gothic:topic-req:nomount:Count","topic":"nomount","field":"Count","payload":{"Count":1}},`+
+			`{"t":2,"kind":"topic","dir":"bcast","event":"gothic:topic:nomount:Count","topic":"nomount","field":"Count","payload":{"Count":1}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bus POST status = %d, want 200", rec.Code)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/_gothicframework/reload/bus?last=10", nil)
+	getRec := httptest.NewRecorder()
+	proxy.ServeHTTP(getRec, getReq)
+	if ct := getRec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("bus GET Content-Type = %q, want application/json", ct)
+	}
+	var out struct {
+		Records []busRecord `json:"records"`
+	}
+	if err := json.Unmarshal(getRec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("bus GET body not JSON: %v", err)
+	}
+	if len(out.Records) != 2 {
+		t.Fatalf("bus GET returned %d records, want 2", len(out.Records))
+	}
+	// Newest first: the bcast record (t=2) comes before the pub one (t=1).
+	if out.Records[0]["dir"] != "bcast" || out.Records[1]["dir"] != "pub" {
+		t.Errorf("records not newest-first: %v / %v", out.Records[0], out.Records[1])
+	}
+	// Shape: decoded payloads survive the round trip as objects.
+	if p, ok := out.Records[1]["payload"].(map[string]any); !ok || p["Count"] != float64(1) {
+		t.Errorf("pub payload not decoded-passthrough: %v", out.Records[1]["payload"])
+	}
+}
+
+// TestServeHTTP_BusLastWindow trims the read: 3 records in, ?last=2 returns
+// exactly the two NEWEST (dropping the oldest), newest-first.
+func TestServeHTTP_BusLastWindow(t *testing.T) {
+	proxy := NewProxyHelper()
+	for i := 1; i <= 3; i++ {
+		busPostOne(proxy, fmt.Sprintf(`{"t":%d,"kind":"control","dir":"pub","event":"gothic:core:ping"}`, i))
+	}
+	getRec := httptest.NewRecorder()
+	proxy.ServeHTTP(getRec, httptest.NewRequest(http.MethodGet, "/_gothicframework/reload/bus?last=2", nil))
+	var out struct {
+		Records []busRecord `json:"records"`
+	}
+	if err := json.Unmarshal(getRec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("bus GET body not JSON: %v", err)
+	}
+	if len(out.Records) != 2 {
+		t.Fatalf("got %d records with ?last=2, want 2", len(out.Records))
+	}
+	if out.Records[0]["t"] != float64(3) || out.Records[1]["t"] != float64(2) {
+		t.Errorf("window returned t=%v/t=%v, want the two newest (3,2) newest-first",
+			out.Records[0]["t"], out.Records[1]["t"])
+	}
+}
+
+// TestServeHTTP_BusRingEviction proves the ring stays bounded at 500 entries
+// and the ?last= read returns the NEWEST records after eviction.
+func TestServeHTTP_BusRingEviction(t *testing.T) {
+	proxy := NewProxyHelper()
+
+	for i := 0; i < busRingCapacity+10; i++ {
+		rec := busPostOne(proxy, fmt.Sprintf(
+			`{"t":%d,"kind":"topic","dir":"pub","event":"gothic:topic-req:n:Count","topic":"n","field":"Count","payload":{"seq":%d}}`, i, i))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("batch %d rejected: %d", i, rec.Code)
+		}
+	}
+
+	if got := proxy.Bus.count(); got != busRingCapacity {
+		t.Fatalf("ring holds %d records, want %d", got, busRingCapacity)
+	}
+	getRec := httptest.NewRecorder()
+	proxy.ServeHTTP(getRec, httptest.NewRequest(http.MethodGet, "/_gothicframework/reload/bus?last=10", nil))
+	var out struct {
+		Records []busRecord `json:"records"`
+	}
+	if err := json.Unmarshal(getRec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("bus GET body not JSON: %v", err)
+	}
+	// Newest first: the head record carries the LAST seq (509), not an evicted one.
+	if p, ok := out.Records[0]["payload"].(map[string]any); !ok || p["seq"] != float64(busRingCapacity+9) {
+		t.Errorf("newest record payload = %v, want seq %d", out.Records[0]["payload"], busRingCapacity+9)
+	}
+	if len(out.Records) != 10 {
+		t.Errorf("?last=10 returned %d records, want 10", len(out.Records))
+	}
+}
+
+// TestServeHTTP_BusBadPayload keeps a malformed batch from poisoning the ring.
+func TestServeHTTP_BusBadPayload(t *testing.T) {
+	proxy := NewProxyHelper()
+
+	rec := busPostOne(proxy, `not json at all`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for invalid JSON", rec.Code)
+	}
+	if got := proxy.Bus.count(); got != 0 {
+		t.Errorf("ring holds %d records after a rejected batch, want 0", got)
+	}
+}
+
+// TestServeHTTP_BusMethodNotAllowed pins the allowed method set.
+func TestServeHTTP_BusMethodNotAllowed(t *testing.T) {
+	proxy := NewProxyHelper()
+	req := httptest.NewRequest(http.MethodDelete, "/_gothicframework/reload/bus", nil)
+	rec := httptest.NewRecorder()
+	proxy.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", rec.Code)
 	}
 }

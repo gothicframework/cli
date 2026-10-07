@@ -1,16 +1,43 @@
 package buildtools
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
 	templgen "github.com/a-h/templ/cmd/templ/generatecmd"
 	"github.com/gothicframework/cli/v3/internal/output"
 	templcache "github.com/gothicframework/core/render"
 )
+
+// lastGenerateOutput captures the merged stdout+stderr of the most recent
+// templ generator invocation, so the build-control layer can translate a
+// failure into structured diagnostics with the raw compiler text preserved.
+// Each run overwrites the previous one.
+var lastGenerateOutput struct {
+	mu  sync.Mutex
+	raw string
+}
+
+func recordGenerateOutput(raw string) {
+	lastGenerateOutput.mu.Lock()
+	lastGenerateOutput.raw = raw
+	lastGenerateOutput.mu.Unlock()
+}
+
+// LastTemplOutput returns the raw stdout+stderr of the most recent templ
+// generator invocation (including every noise line), for diagnostics
+// translation. Empty after a run that produced no output.
+func LastTemplOutput() string {
+	lastGenerateOutput.mu.Lock()
+	defer lastGenerateOutput.mu.Unlock()
+	return lastGenerateOutput.raw
+}
 
 type TemplHelper struct {
 }
@@ -24,10 +51,14 @@ type TemplHelper struct {
 var generate = func(args []string) error {
 	// The generator narrates its own event loop, which duplicates the phase the
 	// hot-reload stream already reports. Only that narration is dropped;
-	// diagnostics still reach the terminal.
-	out := output.NewLineFilter(os.Stdout, isTemplNoise)
-	errOut := output.NewLineFilter(os.Stderr, isTemplNoise)
-	return templgen.Run(context.Background(), out, errOut, args)
+	// diagnostics still reach the terminal — and are captured for the
+	// structured-diagnostics layer.
+	var collector bytes.Buffer
+	out := output.NewLineFilter(io.MultiWriter(os.Stdout, &collector), isTemplNoise)
+	errOut := output.NewLineFilter(io.MultiWriter(os.Stderr, &collector), isTemplNoise)
+	err := templgen.Run(context.Background(), out, errOut, args)
+	recordGenerateOutput(collector.String())
+	return err
 }
 
 // The generator's progress chatter: a per-event "Post-generation event
@@ -99,4 +130,24 @@ func generatePerFile(dirty []string) error {
 		}
 	}
 	return nil
+}
+
+// RenderFile regenerates a single .templ file (templ generate -f), ignoring
+// the dirty-file cache, and refreshes its cache entry on success. Returns the
+// raw generator output (stdout+stderr merged) alongside the error, so a
+// targeted build can report structured diagnostics.
+func (t *TemplHelper) RenderFile(file string) (string, error) {
+	var buf bytes.Buffer
+	out := output.NewLineFilter(io.MultiWriter(os.Stdout, &buf), isTemplNoise)
+	errOut := output.NewLineFilter(io.MultiWriter(os.Stderr, &buf), isTemplNoise)
+	err := templgen.Run(context.Background(), out, errOut, []string{"generate", "-f", file})
+	if err != nil {
+		return buf.String(), fmt.Errorf("templ generate %s: %w", file, err)
+	}
+	if h := templcache.HashFile(file); h != "" {
+		cache := templcache.Load()
+		cache.Update(file, h)
+		_ = cache.Save()
+	}
+	return buf.String(), nil
 }

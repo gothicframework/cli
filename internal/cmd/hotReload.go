@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -19,8 +20,11 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/gothicframework/cli/v3/internal/browser"
+	buildctl "github.com/gothicframework/cli/v3/internal/buildctl"
 	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
 	"github.com/gothicframework/cli/v3/internal/output"
+	"github.com/gothicframework/cli/v3/internal/proxy"
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 )
@@ -37,6 +41,7 @@ It allows you to develop and debug your Gothic app more efficiently, with change
 func init() {
 	rootCmd.AddCommand(hotReloadCmd)
 	hotReloadCmd.Flags().BoolP("verbose", "v", false, "Show every build phase and log each HTTP request")
+	hotReloadCmd.Flags().Bool("no-mcp", false, "Disable the dev session's MCP server (default: served at /_gothicframework/mcp)")
 }
 
 type HotReloadCommand struct {
@@ -63,22 +68,42 @@ type HotReloadCommand struct {
 	// of the session, where it is the only thing describing the work ahead.
 	wasmInventoryShown bool
 	verbose            bool
+	// noMCP opts out of the dev session's MCP surface (the endpoint then
+	// answers 404 without a backend round trip).
+	noMCP bool
+	// managedMu serialises the managed-browser field: assignments happen on
+	// the session's main goroutine, MCP requests read it on the proxy's
+	// handler goroutines.
+	managedMu sync.Mutex
+
+	// The project's framework module pins, read once and cached (the MCP
+	// skill resolver runs on request goroutines).
+	skillConfigOnce sync.Once
+	skillConfigVal  gothic_cli.Config
+	skillConfigErr  error
 	// wasmMu serialises the WASM stage inside the background goroutine so a
 	// burst of saves queues GenerateAll calls instead of racing them.
 	wasmMu sync.Mutex
 
-	// Injectable seams for tests. Defaults set in newHotReloadCommandCli are
-	// exactly equivalent to the previous inline behavior, so production paths
-	// are unchanged.
-	openBrowserFn func(url string) error      // default: defaultOpenBrowser
-	sleeper       func(d time.Duration)       // default: time.Sleep
-	proxyRunner   func(target *url.URL) error // default: cli.Proxy.RunProxy("localhost", 3000, target)
-	wasmStage     func() (int, error)         // default: buildWasmAll + RebuiltCount
+	// ctl is the build-control controller the rebuild cycle runs through:
+	// every stage call goes through it and returns structured results. Built
+	// lazily (buildCtl) so tests can inject a controller with fake seams.
+	ctl   *buildctl.Controller
+	ctlMu sync.Mutex
+
+	// Injectable seams for tests. Defaults set at the top of HotReload are
+	// the production behavior, so tests only override what they assert on.
+	// The browser seam's default is the session's managed go-rod browser; the
+	// user's desktop browser is never opened by the dev command.
+	openBrowserFn func(url string) error       // default: startManagedBrowser
+	sleeper       func(d time.Duration)        // default: time.Sleep
+	proxyRunner   func(target *url.URL) error  // default: cli.Proxy.RunProxy("localhost", 3000, target)
+	wasmStage     func() (int, error)          // default: buildWasmAll + RebuiltCount
 	sseSend       func(eventType, data string) // default: command.cli.Proxy.Sse.Send
-	// browserProbeBudget is how long to wait for an already-open tab to
-	// reconnect before opening a new one. Unset takes the default; the hermetic
-	// tests set a nanosecond so the probe resolves at once.
-	browserProbeBudget time.Duration
+
+	// managedBrowser is the dev session's own browser, created on first use
+	// and torn down with the session. Nil until startManagedBrowser runs.
+	managedBrowser *browser.Manager
 }
 
 func newHotReloadCommandCli(cli *gothic_cli.GothicCli) HotReloadCommand {
@@ -103,8 +128,79 @@ func newHotReloadCommand(cli gothic_cli.GothicCli) RunEFunc {
 	return func(cmd *cobra.Command, args []string) error {
 		command := newHotReloadCommandCli(&cli)
 		command.verbose, _ = cmd.Flags().GetBool("verbose")
+		command.noMCP, _ = cmd.Flags().GetBool("no-mcp")
 
 		return command.HotReload()
+	}
+}
+
+// buildCtl returns the session's build controller, building the production
+// one over the command's cli on first use. Tests inject their own controller
+// by assigning the field directly.
+func (command *HotReloadCommand) buildCtl() *buildctl.Controller {
+	command.ctlMu.Lock()
+	defer command.ctlMu.Unlock()
+	if command.ctl == nil {
+		command.ctl = buildctl.New(command.cli, buildctl.Options{
+			MainBinary:   command.mainBinaryName,
+			SyncEmbedded: syncEmbeddedPublicFile,
+			WasmLogf:     wasmLogf,
+			WasmErrorf:   wasmErrorf,
+			// The inventory line fires between the scan and the generate
+			// phase; only the first build of the session announces counts.
+			WasmInventory: func(pages, components, topics int) {
+				if command.wasmInventoryShown {
+					return
+				}
+				wasmLogf("building %s, %s, %s...",
+					wasmCount(pages, "page(s)"),
+					wasmCount(components, "component(s)"),
+					wasmCount(topics, "topic(s)"))
+				command.wasmInventoryShown = true
+			},
+			// Edit sessions: hold the debounce timer so saves during a
+			// multi-file edit sequence do not arm watcher-driven rebuilds.
+			BeginEdit: command.holdWatcher,
+			AfterSync: command.afterEditSync,
+		})
+	}
+	return command.ctl
+}
+
+// holdWatcher stops the debounce timer so a save that lands during an edit
+// session does not arm a watcher-driven rebuild racing the session's lock.
+func (command *HotReloadCommand) holdWatcher() (end func()) {
+	command.debounceMu.Lock()
+	if command.debounceTimer != nil {
+		command.debounceTimer.Stop()
+		command.debounceTimer = nil
+	}
+	command.pendingTrigger = ""
+	command.debounceMu.Unlock()
+	return func() {}
+}
+
+// afterEditSync re-arms the normal rebuild cycle once the edit session's sync
+// is done, so the app binary and the browser catch up with the edit.
+func (command *HotReloadCommand) afterEditSync(res buildctl.BuildResult) {
+	command.scheduleRebuild("")
+}
+
+// mirrorDiagnostics prints the translated diagnoses of a failed stage. The
+// raw compiler output is already on screen (echoed live); these lines carry
+// the why and the how-to-fix so the reader is never left with a raw wall of
+// compiler text.
+func (command *HotReloadCommand) mirrorDiagnostics(diags []buildctl.Diagnostic) {
+	for _, d := range diags {
+		if d.Diagnosis != "" {
+			output.Errorln("diagnosis: %s", d.Diagnosis)
+		}
+		if d.Fix != "" {
+			output.Errorln("fix: %s", d.Fix)
+		}
+		if d.Skill != "" {
+			output.Errorln("relevant skill: %s (bundled `gothic skill`)", d.Skill)
+		}
 	}
 }
 
@@ -121,7 +217,7 @@ func (command *HotReloadCommand) HotReload() error {
 	// the method value here (pointer receiver) is safe and equivalent to the
 	// original inline calls.
 	if command.openBrowserFn == nil {
-		command.openBrowserFn = command.defaultOpenBrowser
+		command.openBrowserFn = command.startManagedBrowser
 	}
 	if command.sleeper == nil {
 		command.sleeper = time.Sleep
@@ -137,10 +233,10 @@ func (command *HotReloadCommand) HotReload() error {
 	if command.sseSend == nil {
 		command.sseSend = command.cli.Proxy.Sse.Send
 	}
-	if command.browserProbeBudget == 0 {
-		command.browserProbeBudget = defaultBrowserProbeBudget
-	}
 	godotenv.Load()
+	// The bus mirror follows the verbose flag: --verbose prints one deduped
+	// line per ingested dev-bus record, off by default (see proxy.BusVerbose).
+	proxy.BusVerbose = command.verbose
 	// Load config to pick up binary overrides if present
 	command.cli.GetConfig()
 	// Ensure tailwind binary is available before starting watch
@@ -170,12 +266,19 @@ func (command *HotReloadCommand) HotReload() error {
 	}()
 
 	output.PrintRaw(banner())
-	// Open a tab only when nobody is already watching. A tab left open from a
-	// previous session reconnects to the reload stream on its own, so opening
-	// another one just piles up duplicates across restarts.
-	if !command.browserAlreadyOpen(command.browserProbeBudget) {
-		command.openBrowserFn("http://127.0.0.1:3000")
+	// Bind the MCP endpoint into the proxy's dev-handler map before the
+	// select loop takes over: the handler rides the proxy's listener (it is
+	// served on the same port the browser talks to), so no extra goroutine or
+	// listener belongs to it. With --no-mcp the path answers a clean 404.
+	command.mountMCPSurface()
+	// The managed browser is ours: open it (or bring the already-running
+	// profile back to the dev origin) instead of opening a window on the
+	// user's desktop. The default seam launches the session's go-rod browser;
+	// it rides the session context and is closed on shutdown.
+	if err := command.openBrowserFn("http://127.0.0.1:3000"); err != nil {
+		output.Errorln("cannot start the managed browser: %v", err)
 	}
+	defer command.closeManagedBrowser()
 
 	select {
 	case err := <-proxyErrCh:
@@ -188,29 +291,64 @@ func (command *HotReloadCommand) HotReload() error {
 		// WaitDelay window to exit on their own before this process goes.
 		output.Println("Shutting down...")
 		command.awaitChildren(5 * time.Second)
+		// The managed browser is session state, not a child process: close it
+		// explicitly. Rod's leakless would also reap it on exit, but a clean
+		// close keeps the profile files consistent for the next session.
+		command.closeManagedBrowser()
 		return nil
 	}
 }
 
-// defaultBrowserProbeBudget covers the reload stream's own retry interval plus
-// the connect, so a tab left over from the previous session has time to come
-// back before the session decides nobody is watching.
-const defaultBrowserProbeBudget = 1500 * time.Millisecond
+// browserIdleAfter is how long the managed browser stays up with no activity
+// before it closes itself; the next browser call relaunches it.
+const browserIdleAfter = 5 * time.Minute
 
-// browserAlreadyOpen reports whether a tab is already listening to the reload
-// stream, polling until one shows up or the budget expires. The stream sends a
-// short retry interval, so a tab left over from the previous session reconnects
-// well inside this window.
-func (command *HotReloadCommand) browserAlreadyOpen(budget time.Duration) bool {
-	deadline := time.Now().Add(budget)
-	for {
-		if command.cli.Proxy.Sse.Subscribers() > 0 {
-			return true
-		}
-		if time.Now().After(deadline) {
-			return false
-		}
-		time.Sleep(100 * time.Millisecond)
+// startManagedBrowser is the production browser seam: it brings up the
+// session's managed go-rod browser, pointed at the dev origin. One Manager
+// lives for the whole session and is closed on shutdown; the browser itself
+// idles out and relaunches on demand inside that window.
+func (command *HotReloadCommand) startManagedBrowser(targetURL string) error {
+	command.managedMu.Lock()
+	if command.managedBrowser == nil {
+		opts := browser.NewOptions()
+		opts.UserDataDir = filepath.Join(".gothicCli", "mcp", "state", "browser-profile")
+		opts.IdleAfter = browserIdleAfter
+		mgr := browser.New(command.processCtx(), opts)
+		// The allowlist covers the app's own origin (the listen address may
+		// use a non-default port) plus the proxy the browser traffic flows
+		// through on the default dev ports.
+		mgr.SetAllowedHostPorts([]string{
+			urlHostPort(targetURL),
+			"localhost:3000",
+			"127.0.0.1:3000",
+			"127.0.0.1:60714",
+		})
+		command.managedBrowser = mgr
+	}
+	command.managedMu.Unlock()
+	if err := command.managedBrowser.EnsureStarted(); err != nil {
+		return err
+	}
+	return command.managedBrowser.Open(targetURL)
+}
+
+// urlHostPort renders an http://host:port URL as host:port.
+func urlHostPort(targetURL string) string {
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		return targetURL
+	}
+	return u.Host
+}
+
+// closeManagedBrowser tears the managed browser down when the session ends.
+func (command *HotReloadCommand) closeManagedBrowser() {
+	command.managedMu.Lock()
+	mgr := command.managedBrowser
+	command.managedBrowser = nil
+	command.managedMu.Unlock()
+	if mgr != nil {
+		mgr.Close()
 	}
 }
 
@@ -431,6 +569,11 @@ func (command *HotReloadCommand) waitForStyleSheet() {
 // single editor save) into a single rebuild. The timer resets on each event;
 // the rebuild fires 150ms after the last event in the burst.
 func (command *HotReloadCommand) scheduleRebuild(trigger string) {
+	// An edit session holds the build lock: saves during a multi-file edit
+	// sequence are covered by its EditEnd sync, not by a racing rebuild.
+	if command.buildCtl().Editing() {
+		return
+	}
 	command.debounceMu.Lock()
 	defer command.debounceMu.Unlock()
 	if trigger != "" {
@@ -467,6 +610,12 @@ func displayPath(p string) string {
 }
 
 func (command *HotReloadCommand) rebuild() {
+	// An edit session holds the build lock: watcher-driven rebuilds wait for
+	// its EditEnd sync instead of racing the same artifacts. A rebuild that
+	// was armed before the session opened drops here too.
+	if command.buildCtl().Editing() {
+		return
+	}
 	command.mutex.Lock()
 	defer command.mutex.Unlock()
 
@@ -485,27 +634,29 @@ func (command *HotReloadCommand) rebuild() {
 	}
 
 	command.phase("Build routes...")
-	config, err := command.cli.GetConfig()
-	if err != nil {
-		output.Errorln("cannot read the config: %v", err)
-		command.sseSend("builderror", "config: "+err.Error())
-		return
-	}
-	if err := command.cli.FileBasedRouter.Render(config.GoModName); err != nil {
-		output.Errorln("cannot build routes: %v", err)
-		command.sseSend("builderror", "routes: "+err.Error())
-		return
-	}
-	if err := syncEmbeddedPublicFile(&config); err != nil {
-		output.Errorln("cannot sync the embedded public file: %v", err)
-		command.sseSend("builderror", "embedded: "+err.Error())
+	routesRes := command.buildCtl().BuildRoutes()
+	if !routesRes.OK {
+		switch routesRes.Step {
+		case buildctl.StepConfig:
+			output.Errorln("cannot read the config: %v", routesRes.Err)
+			command.sseSend("builderror", "config: "+routesRes.Err)
+		case buildctl.StepEmbedded:
+			output.Errorln("cannot sync the embedded public file: %v", routesRes.Err)
+			command.sseSend("builderror", "embedded: "+routesRes.Err)
+		default:
+			output.Errorln("cannot build routes: %v", routesRes.Err)
+			command.sseSend("builderror", "routes: "+routesRes.Err)
+		}
+		command.mirrorDiagnostics(routesRes.Diagnostics)
 		return
 	}
 
 	command.phase("Build templ...")
-	if err := command.cli.Templ.Render(); err != nil {
-		output.Errorln("templ failed: %v", err)
-		command.sseSend("builderror", "templ: "+err.Error())
+	templRes := command.buildCtl().BuildTempl("")
+	if !templRes.OK {
+		output.Errorln("templ failed: %v", templRes.Err)
+		command.sseSend("builderror", "templ: "+templRes.Err)
+		command.mirrorDiagnostics(templRes.Diagnostics)
 		return
 	}
 
@@ -526,16 +677,11 @@ func (command *HotReloadCommand) rebuild() {
 
 	listenAddr := resolveListenAddr()
 	command.phase("Build app...")
-	// Build the whole package ("."), not just main.go: the server config now lives in
-	// gothic.config.go (var Config, referenced from main.go as Config.Runtime), so a
-	// single-file build fails with "undefined: Config". "." compiles every .go file in
-	// the package directory.
-	buildCmd := exec.Command("go", "build", "-o", command.mainBinaryName, ".")
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		output.Errorln("cannot build the app: %v", err)
-		command.sseSend("builderror", "go build: "+err.Error())
+	goRes := command.buildCtl().BuildGo()
+	if !goRes.OK {
+		output.Errorln("cannot build the app: %v", goRes.Err)
+		command.sseSend("builderror", "go build: "+goRes.Err)
+		command.mirrorDiagnostics(goRes.Diagnostics)
 		return
 	}
 
@@ -613,65 +759,18 @@ func (command *HotReloadCommand) notifyReload(addr string, budget time.Duration)
 }
 
 func (command *HotReloadCommand) buildWasmAll() (int, error) {
-	// Gate: skip the whole stage when no input file has changed. The snapshot is
-	// taken here, before anything is read, and is what gets recorded on success,
-	// so a save landing mid-build is not mistaken for content this build compiled.
-	snap := takeWasmInputSnapshot()
-	if !snap.changed {
-		return 0, nil
+	// The whole stage — digest gate, topic-stub ordering, scan (+ tidy
+	// retry), incremental generate, digest record — is the buildctl BuildWasm
+	// tool; the goroutine around it keeps the narration.
+	res := command.buildCtl().BuildWasm("")
+	count := 0
+	if res.Counts != nil {
+		count = res.Counts.Rebuilt
 	}
-
-	command.cli.Wasm.PregenerateTopicStubs()
-	pages, err := command.cli.Wasm.ScanPages("src/pages", "src/components")
-	if err != nil {
-		if strings.Contains(err.Error(), "go mod tidy") || strings.Contains(err.Error(), "updates to go.mod needed") {
-			wasmLogf("go.mod out of date, running go mod tidy...")
-			tidy := exec.Command("go", "mod", "tidy")
-			tidy.Stderr = os.Stderr
-			if tidyErr := tidy.Run(); tidyErr != nil {
-				wasmErrorf("go mod tidy failed: %v", tidyErr)
-				return 0, tidyErr
-			}
-			pages, err = command.cli.Wasm.ScanPages("src/pages", "src/components")
-		}
-		if err != nil {
-			wasmErrorf("scan failed: %v", err)
-			return 0, err
-		}
+	if res.Err != "" {
+		return count, errors.New(res.Err)
 	}
-	if len(pages) == 0 {
-		recordWasmDigestFor(snap, nil)
-		return 0, nil
-	}
-	var nPages, nComponents int
-	for _, p := range pages {
-		if p.IsComponent {
-			nComponents++
-		} else {
-			nPages++
-		}
-	}
-	topics := command.cli.Wasm.CountTopics()
-	// Only the first build of the session gets the inventory line. On a rebuild
-	// almost everything is cached, so announcing the full count would suggest
-	// work that is not happening.
-	if !command.wasmInventoryShown {
-		wasmLogf("building %s, %s, %s...",
-			wasmCount(nPages, "page(s)"),
-			wasmCount(nComponents, "component(s)"),
-			wasmCount(topics, "topic(s)"))
-		command.wasmInventoryShown = true
-	}
-	if err := command.cli.Wasm.GenerateAll(pages, "public/wasm"); err != nil {
-		wasmErrorf("build failed (continuing with stale binaries): %v", err)
-		return 0, err
-	}
-
-	// Persist only after a successful build, and persist the pre-build snapshot:
-	// see recordWasmDigestFor for why a fresh reading here would strand a stale
-	// binary. The local package dirs come from the scan that just completed.
-	recordWasmDigestFor(snap, collectWasmLocalDirs(pages))
-	return int(command.cli.Wasm.RebuiltCount()), nil
+	return count, nil
 }
 
 // startWasmBuild spawns the WASM compile in a background goroutine hung off

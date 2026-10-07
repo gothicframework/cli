@@ -26,6 +26,13 @@ func (h *WasmHelper) wasmOutputName(httpPath string) string {
 	return s
 }
 
+// HttpPathForSource maps a generated page file path (_templ.go) to the HTTP
+// route it serves. Exported so the build-control layer maps a changed file to
+// its WASM unit with the scanner's own rules instead of a parallel copy.
+func (h *WasmHelper) HttpPathForSource(filePath string) string {
+	return h.normalizeWasmHttpPath(filePath)
+}
+
 // normalizeWasmHttpPath converts a source-file path (e.g.
 // "src/pages/blog/var_slug_templ.go") to the HTTP path it serves
 // ("/blog/{slug}").

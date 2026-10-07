@@ -1,0 +1,38 @@
+{
+  "scroll": [
+    0,
+    0
+  ],
+  "rects": [
+    {
+      "sel": "body",
+      "x": 0,
+      "y": 0,
+      "w": 320,
+      "h": 160,
+      "bg": "#0f0f12",
+      "fg": "",
+      "overflows": false
+    },
+    {
+      "sel": "div.card",
+      "x": 16,
+      "y": 40,
+      "w": 224,
+      "h": 80,
+      "bg": "#1a1a20",
+      "fg": "#e4e4e7",
+      "overflows": false
+    },
+    {
+      "sel": "span.piece",
+      "x": 200,
+      "y": 48,
+      "w": 200,
+      "h": 16,
+      "bg": "#e4e4e7",
+      "fg": "",
+      "overflows": true
+    }
+  ]
+}

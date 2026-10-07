@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -29,6 +30,152 @@ var reloadScriptJS string
 
 var errBodyNotFound = fmt.Errorf("body not found")
 
+// ── Dev bus: the browser-side observer's ingest + read endpoint ──
+//
+// The dev script's observer decodes the page's topic data-plane and core
+// control-plane traffic in the browser and POSTs decoded records here in
+// batches. This ring keeps the last busRingCapacity records so a developer (or
+// a future inspector) can read what a page actually announced, newest-first.
+
+const busRingCapacity = 500
+
+const busDefaultLast = 100 // GET ?last= default when the parameter is absent
+
+const busBodyLimit = 8 << 20 // 8 MB — a 50-record batch can carry large strings
+
+// BusVerbose turns on one deduped terminal line per ingested record. The
+// hot-reload command wires its --verbose flag here; off by default.
+var BusVerbose bool
+
+// busRecord is one observed bus event. Shape (the dev-side contract):
+//
+//	t (ms epoch), kind (topic|durable|control|mark), dir (pub|bcast|act),
+//	event, topic, field, payload (a decoded object, or {raw_hex, schema} when
+//	the frame is undecodable, or null).
+//
+// kind:"mark" records are the capture timeline's act layer: the injected
+// script emits one per user/agent input (click, input, keydown, scroll, …)
+// plus a debounced "settle" signal when the page goes quiet. dir is always
+// "act"; event is the input type; payload carries {sel,x,y,...} identifying
+// what was touched. They ride the same batching and ring as every other kind
+// — this endpoint accepts them without special handling by design.
+type busRecord = map[string]any
+
+type busRing struct {
+	mu   sync.Mutex
+	ents []busRecord
+}
+
+// add appends a batch, evicting the oldest entries beyond the ring capacity.
+func (b *busRing) add(records []busRecord) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, r := range records {
+		if len(b.ents) >= busRingCapacity {
+			copy(b.ents, b.ents[1:])
+			b.ents[len(b.ents)-1] = r
+		} else {
+			b.ents = append(b.ents, r)
+		}
+	}
+}
+
+// newestFirst returns a copy of the ring, newest first. With a non-negative
+// limit, only the newest `limit` records; with a negative limit, all of them.
+func (b *busRing) newestFirst(limit int) []busRecord {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	total := len(b.ents)
+	max := total
+	if limit >= 0 && limit < max {
+		max = limit
+	}
+	out := make([]busRecord, 0, max)
+	for i := 0; i < max; i++ {
+		out = append(out, b.ents[total-1-i])
+	}
+	return out
+}
+
+func (b *busRing) count() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.ents)
+}
+
+// busVerboseKey/Line render the one --verbose line per record. The key carries
+// the record identity, so output.Print's consecutive dedup collapses identical
+// consecutive traffic (e.g. repeated identical broadcasts) with an (xN) suffix.
+func busVerboseKey(rec busRecord) string {
+	return fmt.Sprint(rec["kind"], "|", rec["dir"], "|", rec["event"],
+		"|", rec["topic"], "|", rec["field"])
+}
+
+func busVerboseLine(rec busRecord) string {
+	return fmt.Sprintf("%s bus %s %s topic=%v field=%v payload=%v",
+		output.Tag("Observed"), rec["dir"], rec["event"], rec["topic"], rec["field"], rec["payload"])
+}
+
+// handleBusPOST ingests one batch. Body shape: {"records": [...]} (a bare
+// JSON array is accepted too — the dev contract is deliberately loose).
+// Same-origin only: the endpoint is loopback dev tooling, and a simple
+// cross-origin POST (text/plain content-type skips the CORS preflight) could
+// otherwise plant fabricated records in an agent's observation timeline.
+func (proxy *ProxyHelper) handleBusPOST(w http.ResponseWriter, r *http.Request) {
+	if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+r.Host {
+		http.Error(w, "cross-origin bus post", http.StatusForbidden)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, busBodyLimit))
+	if err != nil {
+		http.Error(w, "cannot read body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	var payload struct {
+		Records []busRecord `json:"records"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		var arr []busRecord
+		if err2 := json.Unmarshal(body, &arr); err2 != nil {
+			http.Error(w, "invalid bus payload: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		payload.Records = arr
+	}
+	if len(payload.Records) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if BusVerbose {
+		for _, rec := range payload.Records {
+			output.Print(busVerboseKey(rec), busVerboseLine(rec))
+		}
+	}
+	proxy.Bus.add(payload.Records)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]int{"stored": len(payload.Records)}); err != nil {
+		output.Errorln("cannot write the bus response: %v", err)
+	}
+}
+
+// handleBusGET serves the ring newest-first; ?last=N trims to the newest N.
+func (proxy *ProxyHelper) handleBusGET(w http.ResponseWriter, r *http.Request) {
+	limit := busDefaultLast
+	if raw := strings.TrimSpace(r.URL.Query().Get("last")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			http.Error(w, "invalid last parameter", http.StatusBadRequest)
+			return
+		}
+		limit = n
+	}
+	recs := proxy.Bus.newestFirst(limit)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"records": recs}); err != nil {
+		output.Errorln("cannot write the bus log: %v", err)
+	}
+}
+
 // proxyStartedAt is a per-process timestamp used as a cache-buster for public
 // assets in the proxy-injected HTML. Every `make dev` restart produces a new
 // value, forcing the browser to fetch fresh CSS/JS instead of serving a stale
@@ -40,6 +187,14 @@ type ProxyHelper struct {
 	Target *url.URL
 	p      *httputil.ReverseProxy
 	Sse    *sseHandler
+	// Bus holds the dev observers' decoded traffic (POST ingest, GET read).
+	Bus *busRing
+	// DevHandlers serves dev-tooling endpoints by exact request path, before
+	// proxying (the dev command binds the MCP surface here; --no-mcp binds
+	// http.NotFound to keep the path answering 404 without a backend round
+	// trip). Unmatched paths (e.g. the app's /_gothicframework/trace) fall
+	// through to the app server as before.
+	DevHandlers map[string]http.Handler
 }
 
 // RoundTripper with retries and capped exponential backoff. The delay ceiling
@@ -72,6 +227,7 @@ type sseHandler struct {
 func NewProxyHelper() ProxyHelper {
 	return ProxyHelper{
 		Sse: NewsseHandler(),
+		Bus: &busRing{},
 	}
 }
 
@@ -140,6 +296,23 @@ func (proxy *ProxyHelper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			http.Error(w, "only GET or POST method allowed", http.StatusMethodNotAllowed)
 		}
+		return
+
+	case "/_gothicframework/reload/bus":
+		switch r.Method {
+		case http.MethodPost:
+			proxy.handleBusPOST(w, r)
+		case http.MethodGet:
+			proxy.handleBusGET(w, r)
+		default:
+			http.Error(w, "only GET or POST method allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
+	// Dev-tooling endpoints bound by the dev command (exact path match).
+	if h := proxy.DevHandlers[r.URL.Path]; h != nil {
+		h.ServeHTTP(w, r)
 		return
 	}
 

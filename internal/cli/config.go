@@ -38,6 +38,17 @@ type Config struct {
 	} `json:"optimizeImages"`
 	Runtime RuntimeConfig `json:"runtime"`
 	Deploy  *DeployConfig `json:"deploy"`
+
+	// FrameworkModules records the go.mod requires of the published framework
+	// libraries (anything under github.com/gothicframework/ — core,
+	// components, middlewares). The WRITTEN pin in the project's go.mod is the
+	// version truth: under a multi-repo workspace harness, replace =>
+	// ../sibling directives make `go list -m` report local checkouts and mask
+	// the real pins, while mf.Require always states the intended version.
+	// Entries are sorted by module path; empty when go.mod requires none of
+	// the framework libraries (e.g. a go.mod created before `gothic init` pins
+	// anything, or mid-migration projects).
+	FrameworkModules []FrameworkModule `json:"frameworkModules,omitempty"`
 }
 
 // RuntimeConfig mirrors the subset of config.RuntimeConfig the CLI needs to make

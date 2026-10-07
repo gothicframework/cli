@@ -1,0 +1,38 @@
+{
+  "scroll": [
+    0,
+    0
+  ],
+  "rects": [
+    {
+      "sel": "body",
+      "x": 0,
+      "y": 0,
+      "w": 320,
+      "h": 160,
+      "bg": "#0f0f12",
+      "fg": "",
+      "overflows": false
+    },
+    {
+      "sel": "header.site-header",
+      "x": 0,
+      "y": 0,
+      "w": 320,
+      "h": 24,
+      "bg": "#1a1a20",
+      "fg": "#e4e4e7",
+      "overflows": false
+    },
+    {
+      "sel": "button.cta",
+      "x": 40,
+      "y": 100,
+      "w": 96,
+      "h": 32,
+      "bg": "#7c3aed",
+      "fg": "#e4e4e7",
+      "overflows": false
+    }
+  ]
+}

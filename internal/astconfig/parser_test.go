@@ -301,3 +301,44 @@ func TestParseMissingFile(t *testing.T) {
 		t.Fatal("expected error for missing gothic.config.go")
 	}
 }
+
+// TestParseFrameworkModulesPinned covers a go.mod that requires the published
+// framework libraries at pinned versions, alongside non-framework requires and
+// a dev-harness-style replace directive (the replace must not change what's
+// recorded — the require version is the truth).
+func TestParseFrameworkModulesPinned(t *testing.T) {
+	cfg, err := Parse("testdata/pinned")
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	got := cfg.FrameworkModules
+	want := []cli.FrameworkModule{
+		{Path: "github.com/gothicframework/components", Version: "v1.3.0"},
+		{Path: "github.com/gothicframework/core", Version: "v1.6.0"},
+		{Path: "github.com/gothicframework/middlewares", Version: "v1.3.0"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("FrameworkModules = %d entries (%v), want %d", len(got), got, len(want))
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("FrameworkModules[%d] = %+v, want %+v", i, got[i], w)
+		}
+	}
+	// Sorted by module path: components < core < middlewares.
+	if !(got[0].Path < got[1].Path && got[1].Path < got[2].Path) {
+		t.Errorf("FrameworkModules not sorted by path: %v", got)
+	}
+}
+
+// TestParseFrameworkModulesNone covers a project whose go.mod (in its most
+// literal form) declares no gothicframework requires — the field stays nil/empty.
+func TestParseFrameworkModulesNone(t *testing.T) {
+	cfg, err := Parse("testdata/basic")
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	if len(cfg.FrameworkModules) != 0 {
+		t.Errorf("FrameworkModules = %v, want empty when go.mod has no gothicframework require", cfg.FrameworkModules)
+	}
+}
