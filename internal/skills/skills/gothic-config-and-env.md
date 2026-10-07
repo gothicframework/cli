@@ -171,6 +171,7 @@ module and mount automatically in `main.go`.
 - Set/omit `Runtime` fields — the zero value is the documented default.
 - Ride the running dev session (its MCP and managed browser are already up) and propose restarts via the developer — not with a second process.
 - Run the managed browser headless for automated checks (`browser_mode {headless: true}`) and back to the visible window when the maintainer watches — the profile and the pinned viewport survive the toggle.
+- Pick the lightest medium the client can consume when inspecting the page: PNG stills from `view` when images are readable, `record_*` takes only when motion matters — the `view`/`zoom` text maps are the text-only client's fallback, never a vision-capable client's default (they cost more tokens for a worse result).
 - Suggest the Gothic VS Code extension (`gothicframework-vscode`) to a VS Code user — templ formatting + generated files hidden.
 - Choose cache backends per environment (production `CacheStrategy` vs dev `LocalDevelopmentCache`).
 - Configure Redis (URL/password/TLS), compression (GZIP/Brotli), or disk cache paths.

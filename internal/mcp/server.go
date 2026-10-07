@@ -109,10 +109,14 @@ func buildServer(factory func() *Capability) *mcp.Server {
 	srv := mcp.NewServer(
 		&mcp.Implementation{Name: "gothic-dev", Version: factory().Version},
 		&mcp.ServerOptions{
-			Instructions: "Gothic Framework dev session. view/zoom = the page as " +
-				"a text map; act/navigate = drive the page; record_* = screencast " +
-				"takes; build_* = the build pipeline; skillsearch/skillinfo/skill = " +
-				"bundled framework docs; trace/logs = the observation timeline.",
+			Instructions: "Gothic Framework dev session. act/navigate = drive the page; " +
+				"view = PNG stills of the page (+zoom for one region); record_* = screencast " +
+				"takes for motion; build_* = the build pipeline; skillsearch/skillinfo/skill = " +
+				"bundled framework docs; trace/logs = the observation timeline. " +
+				"Pick the lightest medium you can actually consume: read view's PNGs when " +
+				"you can see images (record_* only for animation) — the view/zoom text maps " +
+				"are the fallback for clients that cannot see images; a vision-capable " +
+				"client reading them burns tokens for a worse result.",
 		},
 	)
 	s.registerTools(srv)
@@ -216,8 +220,10 @@ func (s *surface) registerTools(srv *mcp.Server) {
 
 	// ── page observation (read-only) ────────────────────────────────────
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        toolView,
-		Description: "Screenshot the page at one or more viewport widths and encode the page-view text map. Paths of the on-disk artifacts are included; the grid payload only when you pass include_text (it is the heavy form).",
+		Name: toolView,
+		Description: "Screenshot the page at one or more viewport widths (PNG stills + DOM manifests on disk). " +
+			"Set include_text ONLY when you cannot read images: the text map is the text-only client's fallback — " +
+			"a vision-capable client should read the PNG instead (more precise, fewer tokens).",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, s.viewTool)
 
@@ -235,14 +241,14 @@ func (s *surface) registerTools(srv *mcp.Server) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        toolCompare,
-		Description: "Capture the page at two viewport widths and compare the two text maps cell by cell.",
+		Description: "Capture the page at two viewport widths and compare them cell by cell. The comparison runs on the text grids regardless, but read the two PNGs when you can see images (the grids are the text-only fallback).",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, s.compareTool)
 
 	// ── recording ───────────────────────────────────────────────────────
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        toolRecordStart,
-		Description: "Start a screencast take over the managed browser (auto-stops on settle or after the budget). Returns the take id.",
+		Description: "Start a screencast take over the managed browser (auto-stops on settle or after the budget). Returns the take id. Use takes only when motion/animation matters and your client can consume video; for layout/style, view's PNG stills are lighter.",
 		Annotations: &mcp.ToolAnnotations{IdempotentHint: false, DestructiveHint: boolPtr(false)},
 	}, s.recordStartTool)
 
