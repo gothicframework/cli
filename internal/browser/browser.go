@@ -19,6 +19,7 @@ package browser
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -112,9 +113,12 @@ type Manager struct {
 	// (nil = the browser's own window size). It outlives navigations and is
 	// re-applied on every relaunch; ClearViewport lifts it. restoreBounds
 	// holds the headful window's pre-pin geometry so the clear path hands
-	// the window back the way the maintainer had it.
+	// the window back the way the maintainer had it. frameOverhead is the
+	// launch-time window-frame cost (outer minus content), measured while
+	// no override is armed, so a pin can size the outer window exactly.
 	pinned        *proto.EmulationSetDeviceMetricsOverride
 	restoreBounds *proto.BrowserBounds
+	frameOverhead [2]int
 
 	// console is the retained page-console ring (see console.go); consoleMu
 	// guards it.
@@ -304,6 +308,13 @@ func (m *Manager) launchLocked() (*rod.Page, error) {
 		// The headful window that just relaunched also gets the pin's
 		// geometry, so the emulation fills the window again.
 		m.matchWindowToViewport(page, m.pinned.Width, m.pinned.Height)
+	} else {
+		// Measure the window-frame overhead (outer size minus the content
+		// area) on a clean, unpinned launch: once a device-metrics override
+		// is armed, innerHeight reports the EMULATED height, not the real
+		// content area, so a pin-time measurement can never converge. The
+		// overhead is what lets a later pin size the outer window exactly.
+		m.frameOverhead = measureFrameOverhead(page)
 	}
 
 	// Retain the page's console errors/warnings for the audit and logs tools.
@@ -487,36 +498,50 @@ func (m *Manager) SetViewport(width, height int, mobile bool) error {
 // size inside whatever window exists; without this the maintainer sees the
 // page canvas shrunk into a corner of a much larger window and empty space
 // everywhere else — it reads as a broken layout but is emulation geometry.
-// The window frame (title/URL bars) sits outside the viewport, so the outer
-// bounds start from an estimate and a correction pass reads the real
-// innerWidth/innerHeight and adjusts; two passes bound the loop. Best
-// effort: a failure leaves the emulation pinned and the window as it was.
+// Outer sizing needs the window-frame overhead (title/URL bars sit outside
+// the viewport); the launch path measures it while no override is armed,
+// because with a pin active innerHeight reports the EMULATED height and can
+// never drive a correction. Without a measurement the estimator keeps the
+// pre-fix two-pass shape (best effort, can overshoot height).
 func (m *Manager) matchWindowToViewport(page *rod.Page, width, height int) {
 	if m.opts.Headless {
 		return
 	}
-	const initialFrameAllowance = 160
-	outerW, outerH := width, height+initialFrameAllowance
-	for pass := 0; pass < 2; pass++ {
-		info, err := (proto.BrowserGetWindowForTarget{}).Call(page)
-		if err != nil {
-			return
-		}
-		bounds := &proto.BrowserBounds{Width: &outerW, Height: &outerH, WindowState: proto.BrowserWindowStateNormal}
-		if err := (proto.BrowserSetWindowBounds{WindowID: info.WindowID, Bounds: bounds}).Call(page); err != nil {
-			return
-		}
-		dims, err := viewportDims(page)
-		if err != nil {
-			return
-		}
-		outerW += width - int(dims[0])
-		outerH += height - int(dims[1])
-		dw, dh := width-int(dims[0]), height-int(dims[1])
-		if dw >= -1 && dw <= 1 && dh >= -1 && dh <= 1 {
-			return
-		}
+	var outerW, outerH int
+	if m.frameOverhead[0] > 0 || m.frameOverhead[1] > 0 {
+		outerW = width + m.frameOverhead[0]
+		outerH = height + m.frameOverhead[1]
+	} else {
+		const initialFrameAllowance = 160
+		outerW, outerH = width, height+initialFrameAllowance
 	}
+	info, err := (proto.BrowserGetWindowForTarget{}).Call(page)
+	if err != nil {
+		return
+	}
+	bounds := &proto.BrowserBounds{Width: &outerW, Height: &outerH, WindowState: proto.BrowserWindowStateNormal}
+	_ = (proto.BrowserSetWindowBounds{WindowID: info.WindowID, Bounds: bounds}).Call(page)
+}
+
+// measureFrameOverhead reads the live window's outer size minus its content
+// area — honest numbers only while no device-metrics override is armed (inner
+// dims then report the real content area). nil when any read fails or the
+// numbers are implausible; the caller then falls back to the rough estimator.
+func measureFrameOverhead(page *rod.Page) [2]int {
+	res, err := page.Eval(`() => JSON.stringify({ow: outerWidth, iw: innerWidth, oh: outerHeight, ih: innerHeight})`)
+	if err != nil {
+		return [2]int{}
+	}
+	var raw struct{ OW, IW, OH, IH float64 }
+	if json.Unmarshal([]byte(res.Value.Str()), &raw) != nil {
+		return [2]int{}
+	}
+	ow, iw := int(raw.OW), int(raw.IW)
+	oh, ih := int(raw.OH), int(raw.IH)
+	if ow <= iw || oh <= ih || iw <= 0 || ih <= 0 {
+		return [2]int{}
+	}
+	return [2]int{ow - iw, oh - ih}
 }
 
 // ClearViewport lifts a pinned override and restores the browser's own window
