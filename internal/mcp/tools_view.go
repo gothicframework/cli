@@ -14,8 +14,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gothicframework/cli/v3/internal/browser"
-	"github.com/gothicframework/cli/v3/internal/pagemap"
+	"github.com/gothicframework/cli/v4/internal/browser"
+	"github.com/gothicframework/cli/v4/internal/pagemap"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

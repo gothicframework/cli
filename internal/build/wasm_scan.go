@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gothicframework/cli/v3/internal/build/astx"
+	"github.com/gothicframework/cli/v4/internal/build/astx"
 	"golang.org/x/tools/go/packages"
 )
 

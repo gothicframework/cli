@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
-	cli_data "github.com/gothicframework/cli/v3/internal/scaffold"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
+	cli_data "github.com/gothicframework/cli/v4/internal/scaffold"
 )
 
 // withStdin replaces os.Stdin with a pipe carrying the given input for the

@@ -12,10 +12,10 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 
 	helpers    "github.com/gothicframework/core/render"
-	buildtools "github.com/gothicframework/cli/v3/internal/buildtools"
-	proxy      "github.com/gothicframework/cli/v3/internal/proxy"
+	buildtools "github.com/gothicframework/cli/v4/internal/buildtools"
+	proxy      "github.com/gothicframework/cli/v4/internal/proxy"
 	routes     "github.com/gothicframework/core/router"
-	wasmhelper "github.com/gothicframework/cli/v3/internal/build"
+	wasmhelper "github.com/gothicframework/cli/v4/internal/build"
 )
 
 // ConfigParser is the indirection that lets pkg/cli call into

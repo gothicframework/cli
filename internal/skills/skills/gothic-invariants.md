@@ -35,7 +35,7 @@ Gothic's design bet: the interactive parts of a web app are built with the Go/WA
 
 ## Versioning model
 
-- The CLI module is `github.com/gothicframework/cli/v3` (the `/v3` path element carries the generation). The libraries `core`, `components`, `middlewares` are suffixless modules versioning independently at v1.x.
+- The CLI module is `github.com/gothicframework/cli/v4` (the `/v3` path element carries the generation). The libraries `core`, `components`, `middlewares` are suffixless modules versioning independently at v1.x.
 - A suffixless module cannot be tagged `/vN` (N≥2) — a v2 of `core` would need a `/v2` module path.
 - Release tag order: `core` → `components` → `middlewares` → `cli` → e2e (downstream modules require upstream tags).
 - `gothic init` is the only command that writes framework versions into a user's `go.mod` (pinned per module); nothing else rewrites those pins. The written pins are the version truth — a local `replace` directive may redirect where a module resolves from, but the `require` line still states the intended version.

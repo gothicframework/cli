@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
 )
 
 func TestResolveListenAddrDefault(t *testing.T) {

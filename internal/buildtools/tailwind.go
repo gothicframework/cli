@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gothicframework/cli/v3/internal/output"
+	"github.com/gothicframework/cli/v4/internal/output"
 )
 
 // The watcher's per-scan chatter: a "Rebuilding..." announcement, a "Done in

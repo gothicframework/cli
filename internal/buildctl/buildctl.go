@@ -28,9 +28,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	helpers "github.com/gothicframework/cli/v3/internal/build"
-	buildtools "github.com/gothicframework/cli/v3/internal/buildtools"
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
+	helpers "github.com/gothicframework/cli/v4/internal/build"
+	buildtools "github.com/gothicframework/cli/v4/internal/buildtools"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
 	templcache "github.com/gothicframework/core/render"
 )
 

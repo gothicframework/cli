@@ -20,11 +20,11 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/gothicframework/cli/v3/internal/browser"
-	buildctl "github.com/gothicframework/cli/v3/internal/buildctl"
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
-	"github.com/gothicframework/cli/v3/internal/output"
-	"github.com/gothicframework/cli/v3/internal/proxy"
+	"github.com/gothicframework/cli/v4/internal/browser"
+	buildctl "github.com/gothicframework/cli/v4/internal/buildctl"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
+	"github.com/gothicframework/cli/v4/internal/output"
+	"github.com/gothicframework/cli/v4/internal/proxy"
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 )

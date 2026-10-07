@@ -6,7 +6,7 @@
 
 **Gothic Framework** is a developer-first toolset for building fast, scalable, modern web apps in Go with the **GOTTH stack**: **Go**, **TailwindCSS**, **Templ**, and **HTMX**. Inspired by Next.js, it brings full-stack ergonomics — file-based routing, edge-ready static caching, ISR, image optimization, link prefetching, hot reloading, and one-command cloud deploys — to Go developers.
 
-This module (`github.com/gothicframework/cli/v3`) is the **`gothic` command-line tool**: scaffolding, dev server, build pipeline, WASM/CSS/image tooling, and deploy. It is the only piece you install; the code your app *imports* lives in the companion modules:
+This module (`github.com/gothicframework/cli/v4`) is the **`gothic` command-line tool**: scaffolding, dev server, build pipeline, WASM/CSS/image tooling, and deploy. It is the only piece you install; the code your app *imports* lives in the companion modules:
 
 - **[`github.com/gothicframework/core`](https://github.com/gothicframework/core)** — the runtime library (`config`, `router`, `wasm`, `runtimeassets`, `render`, …).
 - **[`github.com/gothicframework/components`](https://github.com/gothicframework/components)** — reusable UI components (`RuntimeScripts`, `Styles`, `StatefulComponentOf`, `OptimizedImage`).
@@ -21,7 +21,7 @@ This module (`github.com/gothicframework/cli/v3`) is the **`gothic` command-line
 Install the `gothic` binary with the Go toolchain:
 
 ```bash
-go install github.com/gothicframework/cli/v3/cmd/gothic@latest
+go install github.com/gothicframework/cli/v4/cmd/gothic@latest
 ```
 
 This puts a `gothic` executable on your `PATH` (in `$(go env GOPATH)/bin`). Verify it:

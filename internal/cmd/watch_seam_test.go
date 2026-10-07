@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
 )
 
 // TestWatchForChangesRunsLoop drives watchForChanges in a temp dir with no

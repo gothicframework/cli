@@ -27,7 +27,7 @@ import (
 
 	"golang.org/x/mod/modfile"
 
-	cli "github.com/gothicframework/cli/v3/internal/cli"
+	cli "github.com/gothicframework/cli/v4/internal/cli"
 	config "github.com/gothicframework/core/config"
 )
 

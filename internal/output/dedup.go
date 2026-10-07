@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gothicframework/cli/v3/internal/termcolor"
+	"github.com/gothicframework/cli/v4/internal/termcolor"
 )
 
 // One mutex and one dedup state for the whole CLI: every line printed through

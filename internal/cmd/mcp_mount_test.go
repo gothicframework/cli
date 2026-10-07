@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
-	"github.com/gothicframework/cli/v3/internal/mcp"
-	"github.com/gothicframework/cli/v3/internal/proxy"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
+	"github.com/gothicframework/cli/v4/internal/mcp"
+	"github.com/gothicframework/cli/v4/internal/proxy"
 )
 
 // mcpRequest is the shared JSON-RPC shape for the streamable HTTP endpoint.

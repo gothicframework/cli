@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gothicframework/cli/v3/internal/buildctl"
+	"github.com/gothicframework/cli/v4/internal/buildctl"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

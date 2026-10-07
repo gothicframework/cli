@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/gothicframework/cli/v3/internal/output"
-	"github.com/gothicframework/cli/v3/internal/termcolor"
+	"github.com/gothicframework/cli/v4/internal/output"
+	"github.com/gothicframework/cli/v4/internal/termcolor"
 )
 
 // ansi* functions resolve at call time via termcolor.Code so the enable check

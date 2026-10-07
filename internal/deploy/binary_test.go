@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	cli "github.com/gothicframework/cli/v3/internal/cli"
+	cli "github.com/gothicframework/cli/v4/internal/cli"
 )
 
 // writeExec writes an executable file (mode 0755) and returns its path.

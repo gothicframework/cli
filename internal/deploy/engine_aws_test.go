@@ -12,8 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 
-	cli "github.com/gothicframework/cli/v3/internal/cli"
-	"github.com/gothicframework/cli/v3/internal/deploy/tfgen"
+	cli "github.com/gothicframework/cli/v4/internal/cli"
+	"github.com/gothicframework/cli/v4/internal/deploy/tfgen"
 	"github.com/gothicframework/core/config"
 )
 

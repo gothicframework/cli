@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	helpers "github.com/gothicframework/cli/v3/internal/build"
+	helpers "github.com/gothicframework/cli/v4/internal/build"
 )
 
 // ── WASM input gate ───────────────────────────────────────────────────────

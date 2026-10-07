@@ -45,7 +45,7 @@ func TestLoader_ByPath(t *testing.T) {
 		t.Fatalf("NewLoader: %v", err)
 	}
 	// The astx package itself must be in the index.
-	pkg := l.ByPath("github.com/gothicframework/cli/v3/internal/build/astx")
+	pkg := l.ByPath("github.com/gothicframework/cli/v4/internal/build/astx")
 	if pkg == nil {
 		t.Fatal("ByPath: expected non-nil for astx package, got nil")
 	}

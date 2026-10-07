@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gothicframework/cli/v3/internal/browser"
+	"github.com/gothicframework/cli/v4/internal/browser"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

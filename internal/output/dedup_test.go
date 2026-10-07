@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gothicframework/cli/v3/internal/termcolor"
+	"github.com/gothicframework/cli/v4/internal/termcolor"
 )
 
 func captureStdout(t *testing.T, fn func()) string {

@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/andybalholm/brotli"
-	"github.com/gothicframework/cli/v3/internal/output"
+	"github.com/gothicframework/cli/v4/internal/output"
 	"golang.org/x/net/html"
 
 	_ "embed"

@@ -4,7 +4,7 @@ import (
 	"runtime"
 	"sync/atomic"
 
-	"github.com/gothicframework/cli/v3/internal/build/astx"
+	"github.com/gothicframework/cli/v4/internal/build/astx"
 	helpers "github.com/gothicframework/core/render"
 )
 

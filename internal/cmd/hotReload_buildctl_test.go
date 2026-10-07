@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	buildctl "github.com/gothicframework/cli/v3/internal/buildctl"
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
+	buildctl "github.com/gothicframework/cli/v4/internal/buildctl"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
 )
 
 // fakeBuildCtl wires a buildctl controller whose stages are test doubles:

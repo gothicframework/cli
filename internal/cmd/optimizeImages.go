@@ -11,7 +11,7 @@ import (
 	"os"
 	"path/filepath"
 
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
 	"github.com/spf13/cobra"
 
 	webp "github.com/gen2brain/webp"

@@ -4,7 +4,7 @@
 // one ring, on one timeline.
 package proxy
 
-import "github.com/gothicframework/cli/v3/internal/output"
+import "github.com/gothicframework/cli/v4/internal/output"
 
 // Records copies up to limit newest records out of the dev bus ring (newest
 // first; limit < 0 = all). The records are plain maps, shaped as the injected

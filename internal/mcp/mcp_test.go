@@ -20,9 +20,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gothicframework/cli/v3/internal/browser"
-	"github.com/gothicframework/cli/v3/internal/buildctl"
-	"github.com/gothicframework/cli/v3/internal/skills"
+	"github.com/gothicframework/cli/v4/internal/browser"
+	"github.com/gothicframework/cli/v4/internal/buildctl"
+	"github.com/gothicframework/cli/v4/internal/skills"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/gothicframework/cli/v3/internal/termcolor"
+	"github.com/gothicframework/cli/v4/internal/termcolor"
 )
 
 // Shorthands sourced from the shared Gothic palette (pkg/helpers/termcolor), so

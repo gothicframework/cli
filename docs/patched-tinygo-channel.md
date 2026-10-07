@@ -106,7 +106,7 @@ code remains dormant for future upstream gaps.
 For any future toolchain change:
 
 1. Reinstall the workspace CLI with
-   `go install github.com/gothicframework/cli/v3/cmd/gothic`.
+   `go install github.com/gothicframework/cli/v4/cmd/gothic`.
 2. Run `gothic wasm install` and confirm `gothic wasm version` reports the
    intended managed version.
 3. Remove the E2E WASM cache so every component recompiles with that toolchain.

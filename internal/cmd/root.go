@@ -10,7 +10,7 @@ import (
 
 	// Blank import registers astconfig.Parse into pkg/cli.ConfigParser so
 	// GetConfig can read gothic.config.go without an import cycle.
-	_ "github.com/gothicframework/cli/v3/internal/astconfig"
+	_ "github.com/gothicframework/cli/v4/internal/astconfig"
 )
 
 type RunEFunc func(cmd *cobra.Command, args []string) error

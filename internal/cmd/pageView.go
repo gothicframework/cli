@@ -15,9 +15,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gothicframework/cli/v3/internal/browser"
-	"github.com/gothicframework/cli/v3/internal/output"
-	"github.com/gothicframework/cli/v3/internal/pagemap"
+	"github.com/gothicframework/cli/v4/internal/browser"
+	"github.com/gothicframework/cli/v4/internal/output"
+	"github.com/gothicframework/cli/v4/internal/pagemap"
 	"github.com/spf13/cobra"
 )
 

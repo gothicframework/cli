@@ -10,11 +10,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gothicframework/cli/v3/internal/browser"
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
-	"github.com/gothicframework/cli/v3/internal/mcp"
-	"github.com/gothicframework/cli/v3/internal/output"
-	"github.com/gothicframework/cli/v3/internal/skills"
+	"github.com/gothicframework/cli/v4/internal/browser"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
+	"github.com/gothicframework/cli/v4/internal/mcp"
+	"github.com/gothicframework/cli/v4/internal/output"
+	"github.com/gothicframework/cli/v4/internal/skills"
 )
 
 // managedEngineLabel is the engine label the MCP page-view payloads carry;

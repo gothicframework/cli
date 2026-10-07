@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	templgen "github.com/a-h/templ/cmd/templ/generatecmd"
-	"github.com/gothicframework/cli/v3/internal/output"
+	"github.com/gothicframework/cli/v4/internal/output"
 	templcache "github.com/gothicframework/core/render"
 )
 

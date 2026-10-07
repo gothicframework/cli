@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
 
 	// Registers the gothic.config.go parser on cli.ConfigParser.
-	_ "github.com/gothicframework/cli/v3/internal/astconfig"
+	_ "github.com/gothicframework/cli/v4/internal/astconfig"
 )
 
 // ── fixtures ──────────────────────────────────────────────────────────────

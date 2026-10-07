@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
-	"github.com/gothicframework/cli/v3/internal/scaffold"
-	"github.com/gothicframework/cli/v3/internal/astconfig"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
+	"github.com/gothicframework/cli/v4/internal/scaffold"
+	"github.com/gothicframework/cli/v4/internal/astconfig"
 )
 
 func runInitInDir(t *testing.T, dir string) error {

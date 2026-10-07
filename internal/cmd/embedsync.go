@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
 	gothic_config "github.com/gothicframework/core/config"
 )
 

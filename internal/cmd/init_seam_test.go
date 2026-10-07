@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
-	cli_data "github.com/gothicframework/cli/v3/internal/scaffold"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
+	cli_data "github.com/gothicframework/cli/v4/internal/scaffold"
 )
 
 // newInitCommandForTest builds an InitCommand with the git seam stubbed so no

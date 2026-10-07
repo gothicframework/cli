@@ -3,8 +3,8 @@ package helpers
 import (
 	"fmt"
 
-	"github.com/gothicframework/cli/v3/internal/output"
-	"github.com/gothicframework/cli/v3/internal/termcolor"
+	"github.com/gothicframework/cli/v4/internal/output"
+	"github.com/gothicframework/cli/v4/internal/termcolor"
 )
 
 // All WASM lines go through the output package, which owns the single stdout

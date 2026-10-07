@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gothicframework/cli/v3/internal/build/astx"
+	"github.com/gothicframework/cli/v4/internal/build/astx"
 )
 
 // goIdentRe matches a valid Go identifier (exported or unexported).

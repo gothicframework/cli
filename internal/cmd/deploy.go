@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	gothic_cli "github.com/gothicframework/cli/v3/internal/cli"
+	gothic_cli "github.com/gothicframework/cli/v4/internal/cli"
 	gothic_config "github.com/gothicframework/core/config"
-	"github.com/gothicframework/cli/v3/internal/astconfig"
-	"github.com/gothicframework/cli/v3/internal/deploy"
+	"github.com/gothicframework/cli/v4/internal/astconfig"
+	"github.com/gothicframework/cli/v4/internal/deploy"
 
 	"github.com/spf13/cobra"
 )

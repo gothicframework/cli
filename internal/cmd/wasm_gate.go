@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	wasmhelper "github.com/gothicframework/cli/v3/internal/build"
-	buildctl "github.com/gothicframework/cli/v3/internal/buildctl"
+	wasmhelper "github.com/gothicframework/cli/v4/internal/build"
+	buildctl "github.com/gothicframework/cli/v4/internal/buildctl"
 )
 
 // ── WASM input gate (delegating) ──────────────────────────────────────────

@@ -22,8 +22,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/gothicframework/cli/v3/internal/cli"
-	"github.com/gothicframework/cli/v3/internal/scaffold"
+	"github.com/gothicframework/cli/v4/internal/cli"
+	"github.com/gothicframework/cli/v4/internal/scaffold"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/modfile"
 )

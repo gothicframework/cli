@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/gothicframework/cli/v3/internal/build/astx"
+	"github.com/gothicframework/cli/v4/internal/build/astx"
 )
 
 // writeProjectFile writes content to a file under the current working

@@ -3,8 +3,8 @@ package cmd
 import (
 	"strings"
 
-	"github.com/gothicframework/cli/v3/internal/output"
-	"github.com/gothicframework/cli/v3/internal/termcolor"
+	"github.com/gothicframework/cli/v4/internal/output"
+	"github.com/gothicframework/cli/v4/internal/termcolor"
 )
 
 // brandRamp walks the documentation site's own gradient: the pink link accent

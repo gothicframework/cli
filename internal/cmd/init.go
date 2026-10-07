@@ -13,8 +13,8 @@ import (
 	"strings"
 	"text/template"
 
-	gothci_cli "github.com/gothicframework/cli/v3/internal/cli"
-	cli_data "github.com/gothicframework/cli/v3/internal/scaffold"
+	gothci_cli "github.com/gothicframework/cli/v4/internal/cli"
+	cli_data "github.com/gothicframework/cli/v4/internal/scaffold"
 	helpers "github.com/gothicframework/core/render"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
