@@ -55,7 +55,7 @@ func TestMountMCPSurfaceOn(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("initialize answered HTTP %d: %s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "\"gothic\"") {
+	if !strings.Contains(rr.Body.String(), "\"gothic-dev\"") {
 		t.Errorf("initialize response does not name the gothic dev server: %s", rr.Body.String())
 	}
 }
