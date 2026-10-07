@@ -17,7 +17,7 @@ See the [top-level README](https://github.com/gothicframework/core/blob/main/REA
 http://127.0.0.1:3000/_gothicframework/mcp
 ```
 
-It is on by default (`--no-mcp` disables it) and is reachable only while the dev process runs. It gives an agent the same loop a maintainer has: drive the managed browser (`navigate`, `act`, `view`, `record_start`/`record_stop`), read the request trace and the browser event bus (`trace`, `logs`), run the build stages with translated compiler errors (`build_templ`, `build_css`, `build_wasm`, `build_go`, `sync`, `build_status`), and load version-matched framework skills (`skillsearch`, `skillinfo`, `skill`, plus the `gothic-skill://{name}` resources).
+It is on by default (`--no-mcp` disables it) and is reachable only while the dev process runs. The managed browser opens VISIBLE at session start so you can watch the app while working; an agent can flip it to headless with `browser_mode`. It gives an agent the same loop a maintainer has: drive the managed browser (`navigate`, `act`, `view`, `record_start`/`record_stop`), read the request trace and the browser event bus (`trace`, `logs`), run the build stages with translated compiler errors (`build_templ`, `build_css`, `build_wasm`, `build_go`, `sync`, `build_status`), and load version-matched framework skills (`skillsearch`, `skillinfo`, `skill`, plus the `gothic-skill://{name}` resources).
 
 Point your MCP client at that URL while `gothic hot-reload` is running:
 

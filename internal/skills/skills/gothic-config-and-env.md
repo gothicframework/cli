@@ -92,12 +92,16 @@ Two optional top-level functions in `gothic.config.go` run around a deploy: `Bef
 `gothic hot-reload` is the dev session: it builds and serves the app on the
 internal port (`:60714`) behind the dev proxy at **`127.0.0.1:3000`**, sets
 `GOTHIC_MODE=dev` for you, watches sources (templ/Tailwind/WASM) and reloads.
+**It opens the managed browser VISIBLE on start**, pointed at the app, so the
+maintainer watches the app while working — agents can flip it to headless
+per session with `browser_mode`.
 
 - **The Developer MCP is part of this session**: it serves
   `/_gothicframework/mcp` on the proxy — **default-on**, with an opt-out
   `--no-mcp`. The session owns a managed browser (headless or headful) that
-  the MCP drives; the developer's own browser is NOT opened by the dev
-  command.
+  the MCP drives; **the managed window opens VISIBLE at session start** so
+  the developer sees the app while working (`browser_mode` flips headless
+  per session).
 - **If you are reading this through the MCP, the session is already running —
   never start a second `gothic hot-reload` as part of normal work.** A second
   instance builds first, then dies at bind with `failed to start proxy

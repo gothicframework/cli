@@ -311,6 +311,11 @@ func (command *HotReloadCommand) startManagedBrowser(targetURL string) error {
 	command.managedMu.Lock()
 	if command.managedBrowser == nil {
 		opts := browser.NewOptions()
+		// The dev session shows the app to the maintainer: the managed
+		// window opens VISIBLE on session start (the MCP can still flip to
+		// headless per session with browser_mode). Headless remains the
+		// Manager default for other consumers (tests, tooling).
+		opts.Headless = false
 		opts.UserDataDir = filepath.Join(".gothicCli", "mcp", "state", "browser-profile")
 		opts.IdleAfter = browserIdleAfter
 		mgr := browser.New(command.processCtx(), opts)
