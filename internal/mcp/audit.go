@@ -104,14 +104,20 @@ func (s *surface) auditTool(ctx context.Context, _ *mcp.CallToolRequest, in audi
 		manifest, _ = pagemap.ParseManifest(data)
 	}
 
-	// 1. DOM/SEO checks — from the rendered HTML (fetched over HTTP) and the
-	//    capture manifest.
-	html, hErr := fetchHTML(ctx, still.URL)
-	if hErr != nil {
-		out.finding(auditFinding{Check: "page-fetch", Status: "skipped",
-			Detail: fmt.Sprintf("cannot fetch %s for the DOM/SEO checks: %v", still.URL, hErr)})
+	// 1. DOM/SEO checks. The audited document is the one the browser renders
+	//    (an authed page's plain HTTP fetch cannot see it — no cookies), so
+	//    the head fields come from the live document when reachable; the
+	//    unauthenticated HTTP fetch stays as the fallback.
+	if h, ok := headInfoFromPage(b); ok {
+		headFindings(h, &out)
 	} else {
-		domFindings(html, manifest, &out)
+		html, hErr := fetchHTML(ctx, still.URL)
+		if hErr != nil {
+			out.finding(auditFinding{Check: "page-fetch", Status: "skipped",
+				Detail: fmt.Sprintf("cannot fetch %s for the DOM/SEO checks: %v", still.URL, hErr)})
+		} else {
+			domFindings(html, manifest, &out)
+		}
 	}
 
 	// 2. Web vitals — buffered PerformanceObserver entries in the page.
@@ -174,6 +180,85 @@ func (o *auditOut) finding(f auditFinding) {
 }
 
 // ── DOM/SEO checks ─────────────────────────────────────────────────────────
+
+// headInfo carries the SEO-relevant head fields read from the live document.
+type headInfo struct {
+	Title       string `json:"title"`
+	Description string `json:"desc"`
+	Canonical   string `json:"canonical"`
+	Viewport    string `json:"viewport"`
+	Lang        string `json:"lang"`
+	H1Count     int    `json:"h1"`
+}
+
+// headInfoFromPage reads the audited page's head fields from the live
+// document — the document the browser renders, cookie-authenticated state
+// included. A plain HTTP fetch of the same URL cannot see an authed page.
+// ok=false when the eval fails or the answer does not carry the envelope,
+// so canned/fake probe answers fall back to the HTTP fetch path.
+func headInfoFromPage(b BrowserPort) (headInfo, bool) {
+	var h struct {
+		Head *headInfo `json:"head"`
+	}
+	val, evalErr := b.Eval(`() => JSON.stringify({ head: {
+		title: document.title,
+		desc: (document.querySelector('meta[name="description"]') || {}).content || "",
+		canonical: (document.querySelector('link[rel="canonical"]') || {}).href || "",
+		viewport: (document.querySelector('meta[name="viewport"]') || {}).content || "",
+		lang: document.documentElement.getAttribute("lang") || "",
+		h1: document.querySelectorAll("h1").length
+	} })`)
+	if evalErr != nil {
+		return headInfo{}, false
+	}
+	if err := json.Unmarshal([]byte(val), &h); err != nil || h.Head == nil {
+		return headInfo{}, false
+	}
+	return *h.Head, true
+}
+
+// headFindings runs the DOM/SEO checks over the live head fields.
+func headFindings(h headInfo, out *auditOut) {
+	if h.Title == "" {
+		out.finding(auditFinding{Check: "seo-title", Status: "fail", FixHint: "add a <title> to the page's layout head"})
+	} else {
+		out.finding(auditFinding{Check: "seo-title", Status: "pass", Detail: fmt.Sprintf("%q", h.Title)})
+	}
+
+	if h.Description == "" {
+		out.finding(auditFinding{Check: "seo-description", Status: "fail", FixHint: "add <meta name=\"description\"> to the head"})
+	} else {
+		out.finding(auditFinding{Check: "seo-description", Status: "pass", Detail: fmt.Sprintf("%q", h.Description)})
+	}
+
+	if h.Canonical == "" {
+		out.finding(auditFinding{Check: "seo-canonical", Status: "fail", FixHint: "add <link rel=\"canonical\"> to the head"})
+	} else {
+		out.finding(auditFinding{Check: "seo-canonical", Status: "pass"})
+	}
+
+	if h.Viewport != "" {
+		out.finding(auditFinding{Check: "seo-viewport", Status: "pass"})
+	} else {
+		out.finding(auditFinding{Check: "seo-viewport", Status: "fail", FixHint: "add <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"})
+	}
+
+	switch {
+	case h.H1Count == 0:
+		out.finding(auditFinding{Check: "dom-h1", Status: "fail", FixHint: "the page has no h1"})
+	case h.H1Count > 1:
+		out.finding(auditFinding{Check: "dom-h1", Status: "fail",
+			Detail: fmt.Sprintf("%d h1 elements", h.H1Count), FixHint: "keep one h1 per page"})
+	default:
+		out.finding(auditFinding{Check: "dom-h1", Status: "pass"})
+	}
+
+	if h.Lang == "" {
+		out.finding(auditFinding{Check: "a11y-lang", Status: "fail", FixHint: "set the lang attribute on <html>"})
+	} else {
+		out.finding(auditFinding{Check: "a11y-lang", Status: "pass"})
+	}
+}
 
 // domFindings runs the DOM/SEO checks over the fetched HTML plus the capture
 // manifest. Everything is a plain regexp/string check on the document —
@@ -425,7 +510,7 @@ func runAxe(ctx context.Context, b BrowserPort) ([]auditFinding, error) {
       }
       resolve(JSON.stringify(out));
     }).catch(err => { clearTimeout(budget); reject(err); });
-  }))`, axeRunBudget.Milliseconds(), axeRunBudget.Milliseconds())
+  })`, axeRunBudget.Milliseconds(), axeRunBudget.Milliseconds())
 	val, err := b.Eval(runJS)
 	if err != nil {
 		return nil, fmt.Errorf("axe run: %v", err)
