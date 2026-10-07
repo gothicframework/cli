@@ -24,7 +24,7 @@ Point your MCP client at that URL while `gothic hot-reload` is running:
 **Claude Code**
 
 ```bash
-claude mcp add --transport http gothic http://127.0.0.1:3000/_gothicframework/mcp
+claude mcp add --transport http gothic-dev http://127.0.0.1:3000/_gothicframework/mcp
 ```
 
 **OpenCode** — add to `opencode.json` (project or `~/.config/opencode/opencode.json`):
@@ -32,10 +32,12 @@ claude mcp add --transport http gothic http://127.0.0.1:3000/_gothicframework/mc
 ```json
 {
   "mcp": {
-    "gothic": {
-      "type": "remote",
-      "url": "http://127.0.0.1:3000/_gothicframework/mcp",
-      "enabled": true
+    "servers": {
+      "gothic-dev": {
+        "type": "remote",
+        "url": "http://127.0.0.1:3000/_gothicframework/mcp",
+        "oauth": false
+      }
     }
   }
 }
@@ -44,7 +46,7 @@ claude mcp add --transport http gothic http://127.0.0.1:3000/_gothicframework/mc
 **Codex** — add to `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.gothic]
+[mcp_servers.gothic-dev]
 url = "http://127.0.0.1:3000/_gothicframework/mcp"
 ```
 
@@ -53,7 +55,7 @@ url = "http://127.0.0.1:3000/_gothicframework/mcp"
 ```json
 {
   "mcpServers": {
-    "gothic": {
+    "gothic-dev": {
       "url": "http://127.0.0.1:3000/_gothicframework/mcp"
     }
   }
@@ -69,7 +71,7 @@ pi install npm:pi-mcp-extension
 ```json
 {
   "mcpServers": {
-    "gothic": {
+    "gothic-dev": {
       "transport": "streamable-http",
       "url": "http://127.0.0.1:3000/_gothicframework/mcp",
       "lifecycle": "eager"

@@ -107,7 +107,7 @@ type surface struct {
 func buildServer(factory func() *Capability) *mcp.Server {
 	s := &surface{factory: factory}
 	srv := mcp.NewServer(
-		&mcp.Implementation{Name: "gothic", Version: factory().Version},
+		&mcp.Implementation{Name: "gothic-dev", Version: factory().Version},
 		&mcp.ServerOptions{
 			Instructions: "Gothic Framework dev session. view/zoom = the page as " +
 				"a text map; act/navigate = drive the page; record_* = screencast " +

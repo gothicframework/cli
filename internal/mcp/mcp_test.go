@@ -510,8 +510,8 @@ func TestServerIdentityPinsNameAndVersion(t *testing.T) {
 	if info == nil {
 		t.Fatal("initialize result carries no serverInfo")
 	}
-	if info.Name != "gothic" {
-		t.Errorf("server name = %q, want %q", info.Name, "gothic")
+	if info.Name != "gothic-dev" {
+		t.Errorf("server name = %q, want %q", info.Name, "gothic-dev")
 	}
 	if info.Version != "v3-test" {
 		t.Errorf("server version = %q, want %q", info.Version, "v3-test")
