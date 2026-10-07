@@ -163,7 +163,7 @@ func GenerateOrchestrator(projectRoot, hookName string, gctx *config.GothicConte
 // findFrameworkRoot resolves the on-disk directory of the core runtime module
 // (which provides core/config) so the orchestrator's go.mod can replace it.
 //
-// After the Part III core/cli split the `gothic` binary is built from the cli/v3
+// After the Part III core/cli split the `gothic` binary is built from the cli/v4
 // module, NOT from core, so the running module (debug.BuildInfo.Main / `go env
 // GOMOD`) is cli — the WRONG module. The runtime packages live in the separate
 // core module. We therefore ask the toolchain where core resolves on disk,
@@ -185,7 +185,7 @@ func findFrameworkRoot() (string, error) {
 	}
 
 	// Fallback: locate core in the module cache from this binary's build info.
-	// core appears as a dependency of the cli/v3 main module; follow an
+	// core appears as a dependency of the cli/v4 main module; follow an
 	// absolute replace if one is recorded, else construct the cache path.
 	if info, ok := debug.ReadBuildInfo(); ok {
 		var dep *debug.Module
