@@ -14,21 +14,55 @@ import gothicComponents "github.com/gothicframework/components"
 *
  */
 
-templ PageLayout() {
+templ PageLayout(showBack bool) {
 	<!DOCTYPE html>
-	<html lang="en" data-theme="dark">
+	<html lang="en" data-theme="dark" class="scroll-smooth">
 		<head>
 			<title>GOTHIC APP</title>
 			<link rel="icon" type="image/x-icon" href="/public/favicon.ico"/>
 			<link rel="shortcut icon" href="/public/favicon.ico"/>
 			<meta charset="UTF-8"/>
-			<meta name="description" content="Landing page for Gothic CLI with link to the official docs"/>
+			<meta name="description" content="A web framework made in Go. Fast, responsive, agent friendly. Minimal JavaScript, Tailwind styling, and simple deploys on AWS, GCP, or your own server."/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 			@gothicComponents.Styles()
 			@gothicComponents.RuntimeScripts()
 		</head>
-		<body class="antialiased flex flex-col justify-center items-center w-screen h-screen bg-black p-3">
-			{ children... }
+		<body hx-ext="preload" hx-boost="true" class="relative min-h-screen w-full bg-black text-white antialiased flex flex-col overflow-x-clip">
+			<div aria-hidden="true" class="pointer-events-none absolute rounded-full w-[420px] h-[420px] top-[-140px] left-[8%] bg-[radial-gradient(circle,rgba(124,58,237,0.16),transparent_70%)]"></div>
+			<div aria-hidden="true" class="pointer-events-none absolute rounded-full w-[380px] h-[380px] top-[35%] right-[-120px] bg-[radial-gradient(circle,rgba(236,72,153,0.10),transparent_70%)]"></div>
+			<div aria-hidden="true" class="pointer-events-none absolute inset-0 bg-[repeating-linear-gradient(0deg,transparent_0_3px,rgba(168,85,247,0.035)_3px_4px)]"></div>
+
+			<header class="relative z-10 w-full">
+				<nav class="flex flex-wrap gap-y-2 items-center justify-between px-5 sm:px-8 py-4 border-b border-[#17142c]">
+					<a href="/" class="font-mono text-[11px] tracking-[0.28em] text-[#e5e1ff]">
+						GOTHIC<span class="text-pink-400">·</span>APP
+					</a>
+					<div class="flex flex-wrap justify-end items-center gap-4 sm:gap-6 font-mono text-[10px] sm:text-[11px] tracking-[0.15em] whitespace-nowrap">
+if showBack {
+							<a href="/" class="text-[#8b8fa3] hover:text-pink-400 transition-colors">← BACK</a>
+						}
+						<a href="/counter" class="text-[#8b8fa3] hover:text-pink-400 transition-colors">COUNTER</a>
+						<a href="/revalidate" class="text-[#8b8fa3] hover:text-pink-400 transition-colors">ISR</a>
+						<a href="/htmx" class="text-[#8b8fa3] hover:text-pink-400 transition-colors">HTMX</a>
+						<a href="/images" class="text-[#8b8fa3] hover:text-pink-400 transition-colors">IMAGES</a>
+						<a href="/mcp" class="text-[#8b8fa3] hover:text-pink-400 transition-colors">MCP</a>
+						<a href="/deploy" class="text-[#8b8fa3] hover:text-pink-400 transition-colors">DEPLOY</a>
+
+						<a href="https://gothicframework.com" target="_blank" class="text-pink-400 hover:text-pink-300 transition-colors">DOCS ↗</a>
+					</div>
+				</nav>
+			</header>
+
+			<main class="relative z-10 flex-1 flex flex-col items-center justify-center w-full px-5 sm:px-8">
+				{ children... }
+			</main>
+
+			<footer class="relative z-10 w-full border-t border-[#17142c]">
+				<div class="flex flex-wrap items-center justify-between gap-2 px-5 sm:px-8 py-3.5 font-mono text-[10px] tracking-[0.12em] text-gray-500">
+					<span>MAKE IT YOURS: <span class="text-[#a78bfa]">src/pages/</span> · HOT RELOADS AS YOU TYPE</span>
+					<span>gothicframework.com</span>
+				</div>
+			</footer>
 		</body>
 	</html>
 }

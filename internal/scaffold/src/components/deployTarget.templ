@@ -1,0 +1,97 @@
+package components
+
+import (
+	routes "github.com/gothicframework/core/router"
+	"net/http"
+)
+
+type DeployTargetProps = string
+
+var DeployTargetConfig = routes.RouteConfig[DeployTargetProps]{
+	Type:       routes.DYNAMIC,
+	HttpMethod: routes.GET,
+	Middleware: func(w http.ResponseWriter, r *http.Request) DeployTargetProps {
+		target := r.URL.Query().Get("target")
+		switch target {
+		case "gcp", "server":
+			return target
+		default:
+			return "aws"
+		}
+	},
+}
+
+func deployTabHref(target string) string {
+	return "/components/deployTarget?target=" + target
+}
+
+const deployTabActiveClass = "inline-flex items-center px-5 py-2 rounded-full font-mono text-[11px] tracking-[0.14em] text-white bg-[linear-gradient(90deg,#ec4899,#7c3aed)] shadow-[0_0_20px_rgba(124,58,237,0.30)]"
+
+const deployTabGhostClass = "inline-flex items-center px-5 py-2 rounded-full font-mono text-[11px] tracking-[0.14em] text-[#8b8fa3] border border-[#2c2350] bg-[#0d0a1e] hover:text-pink-400 hover:border-[#4c2d8f] transition-colors"
+
+func deployCommand(target string) string {
+	if target == "gcp" {
+		return `<span class="text-pink-400">$</span> <span class="text-purple-300">gothic deploy</span> <span class="text-gray-400">--stage dev</span>`
+	}
+	if target == "server" {
+		return `<span class="text-pink-400">$</span> <span class="text-purple-300">docker build</span> <span class="text-gray-400">-t myapp .</span>
+<span class="text-pink-400">$</span> <span class="text-purple-300">docker run</span> <span class="text-gray-400">-p 8080:8080 myapp</span>`
+	}
+	return `<span class="text-pink-400">$</span> <span class="text-purple-300">gothic deploy</span> <span class="text-gray-400">--stage dev</span>`
+}
+
+templ DeployTarget(active DeployTargetProps) {
+	<div id="deploy-target" class="w-full flex flex-col items-center">
+		<div class="flex flex-wrap justify-center gap-2">
+			if active == "aws" {
+				<a href={ templ.URL(deployTabHref("aws")) } hx-get={ templ.URL(deployTabHref("aws")) } hx-target="#deploy-target" hx-swap="outerHTML" class={ deployTabActiveClass }>AWS</a>
+			} else {
+				<a href={ templ.URL(deployTabHref("aws")) } hx-get={ templ.URL(deployTabHref("aws")) } hx-target="#deploy-target" hx-swap="outerHTML" class={ deployTabGhostClass }>AWS</a>
+			}
+			if active == "gcp" {
+				<a href={ templ.URL(deployTabHref("gcp")) } hx-get={ templ.URL(deployTabHref("gcp")) } hx-target="#deploy-target" hx-swap="outerHTML" class={ deployTabActiveClass }>GCP</a>
+			} else {
+				<a href={ templ.URL(deployTabHref("gcp")) } hx-get={ templ.URL(deployTabHref("gcp")) } hx-target="#deploy-target" hx-swap="outerHTML" class={ deployTabGhostClass }>GCP</a>
+			}
+			if active == "server" {
+				<a href={ templ.URL(deployTabHref("server")) } hx-get={ templ.URL(deployTabHref("server")) } hx-target="#deploy-target" hx-swap="outerHTML" class={ deployTabActiveClass }>YOUR SERVER</a>
+			} else {
+				<a href={ templ.URL(deployTabHref("server")) } hx-get={ templ.URL(deployTabHref("server")) } hx-target="#deploy-target" hx-swap="outerHTML" class={ deployTabGhostClass }>YOUR SERVER</a>
+			}
+		</div>
+
+		<div class="mt-5 w-full max-w-2xl min-h-[17rem] flex flex-col p-7 text-left rounded-2xl bg-[linear-gradient(160deg,#14102b,#0b0817)] border border-[#2c2350] shadow-[0_0_60px_rgba(124,58,237,0.10)]">
+			if active == "gcp" {
+				<div class="text-center font-mono text-[10px] tracking-[0.28em] text-pink-400 uppercase">GCP · BETA</div>
+				<div class="relative mt-5">
+					<pre id="deploy-snippet" class="w-full font-mono text-[12px] leading-relaxed text-gray-300 bg-[#0d0a1e] border border-[#2c2350] rounded-xl px-4 py-3 pr-24 overflow-x-auto">@templ.Raw(deployCommand(active))</pre>
+					<button onclick="copyDeploySnippet()" class="absolute top-2 right-2 inline-flex items-center px-3 py-1.5 rounded-full font-mono text-[10px] tracking-[0.14em] text-[#e5e1ff] border border-[#2c2350] bg-[#0b0817] hover:border-[#4c2d8f] hover:text-pink-400 transition-colors"><span id="deploy-copy-label">COPY</span></button>
+				</div>
+				<p class="mt-5 text-[12px] text-gray-400 leading-relaxed">
+					<strong class="text-blue-300">Cloud Run</strong> and <strong class="text-blue-300">Google Cloud Storage</strong>, shipped with the CLI.
+				</p>
+				<a href="https://gothicframework.com/docs/deploy-gcp" target="_blank" class="mt-5 inline-flex items-center self-start font-mono text-[10px] tracking-[0.14em] text-blue-300 border border-[#2c2350] rounded-full px-4 py-1.5 hover:border-[#4c2d8f] hover:text-purple-300 transition-colors">GCP DEPLOY ↗</a>
+			} else if active == "server" {
+				<div class="text-center font-mono text-[10px] tracking-[0.28em] text-pink-400 uppercase">YOUR SERVER · ONE BINARY, IN DOCKER</div>
+				<div class="relative mt-5">
+					<pre id="deploy-snippet" class="w-full font-mono text-[12px] leading-relaxed text-gray-300 bg-[#0d0a1e] border border-[#2c2350] rounded-xl px-4 py-3 pr-24 overflow-x-auto">@templ.Raw(deployCommand(active))</pre>
+					<button onclick="copyDeploySnippet()" class="absolute top-2 right-2 inline-flex items-center px-3 py-1.5 rounded-full font-mono text-[10px] tracking-[0.14em] text-[#e5e1ff] border border-[#2c2350] bg-[#0b0817] hover:border-[#4c2d8f] hover:text-pink-400 transition-colors"><span id="deploy-copy-label">COPY</span></button>
+				</div>
+				<p class="mt-5 text-[12px] text-gray-400 leading-relaxed">
+					No cloud account needed. A Gothic app compiles to a <strong class="text-blue-300">single Go binary</strong>: build the image and run it on any <strong class="text-white">VPS</strong> or your own cloud. The Dockerfile and compose setup are in the docs.
+				</p>
+				<a href="https://gothicframework.com/docs/deploy-docker-setup" target="_blank" class="mt-5 inline-flex items-center self-start font-mono text-[10px] tracking-[0.14em] text-blue-300 border border-[#2c2350] rounded-full px-4 py-1.5 hover:border-[#4c2d8f] hover:text-purple-300 transition-colors">DOCKER SETUP ↗</a>
+			} else {
+				<div class="text-center font-mono text-[10px] tracking-[0.28em] text-pink-400 uppercase">AWS · OPENTOFU</div>
+				<div class="relative mt-5">
+					<pre id="deploy-snippet" class="w-full font-mono text-[12px] leading-relaxed text-gray-300 bg-[#0d0a1e] border border-[#2c2350] rounded-xl px-4 py-3 pr-24 overflow-x-auto">@templ.Raw(deployCommand(active))</pre>
+					<button onclick="copyDeploySnippet()" class="absolute top-2 right-2 inline-flex items-center px-3 py-1.5 rounded-full font-mono text-[10px] tracking-[0.14em] text-[#e5e1ff] border border-[#2c2350] bg-[#0b0817] hover:border-[#4c2d8f] hover:text-pink-400 transition-colors"><span id="deploy-copy-label">COPY</span></button>
+				</div>
+				<p class="mt-5 text-[12px] text-gray-400 leading-relaxed">
+					The whole stack <strong class="text-blue-300">generated for you</strong>: Lambda, API Gateway, S3 and CDN, with <strong class="text-blue-300">Cache-Control</strong> written on deploy.
+				</p>
+				<a href="https://gothicframework.com/docs/aws-cloud" target="_blank" class="mt-5 inline-flex items-center self-start font-mono text-[10px] tracking-[0.14em] text-blue-300 border border-[#2c2350] rounded-full px-4 py-1.5 hover:border-[#4c2d8f] hover:text-purple-300 transition-colors">AWS CLOUD ↗</a>
+			}
+		</div>
+	</div>
+}

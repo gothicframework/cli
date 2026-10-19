@@ -16,5 +16,11 @@ var HelloWorldConfig = routes.RouteConfig[HelloWorldProps]{
 }
 
 templ HelloWorld(props HelloWorldProps) {
-	<span class="font-semibold text-white text-3xl sm:text-4xl md:text-4xl max-w-xl text-center">Hey You!</span>
+	<div class="w-full">
+		<div class="gothic-card p-6 text-center">
+			<div class="gothic-kicker-muted">FROM THE SERVER</div>
+			<p class="mt-3 text-lg font-semibold text-white">Hello from a real templ component</p>
+			<p class="mt-1 text-sm text-gray-400">Rendered by Go, shipped as HTML, swapped in by HTMX.</p>
+		</div>
+	</div>
 }

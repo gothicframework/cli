@@ -68,9 +68,18 @@ func TestInitCreatesSrcStructure(t *testing.T) {
 		"src/routes/routes_gen.go",
 		"src/pages/index.templ",
 		"src/pages/revalidate.templ",
+		"src/pages/counter.templ",
+		"src/pages/htmx.templ",
+		"src/pages/preload.templ",
+		"src/pages/images.templ",
+		"src/pages/mcp.templ",
+		"src/pages/deploy.templ",
 		"src/layouts/layout.templ",
 		"src/components/helloWorld.templ",
 		"src/components/lazyLoad.templ",
+		"src/components/imageDemo.templ",
+		"src/components/mcpSetup.templ",
+		"src/components/deployTarget.templ",
 		"src/css/app.css",
 		"src/api/helloWorld.go",
 	}
@@ -90,6 +99,8 @@ func TestInitCreatesPublicAssets(t *testing.T) {
 	expected := []string{
 		"public/imageExample/blurred.png",
 		"public/imageExample/original.png",
+		"public/imageKeyboard/blurred.webp",
+		"public/imageKeyboard/original.webp",
 		"public/favicon.ico",
 		"public/styles.css",
 	}

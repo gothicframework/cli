@@ -58,6 +58,9 @@ func init() {
 		return NewBinaryManager(c)
 	}
 	cli.NewDeploymentEngine = func(c *cli.Config, awsCfg any) (cli.DeploymentEngine, error) {
+		if c.Deploy != nil && c.Deploy.Provider == cli.GCP {
+			return NewGcpEngine(c)
+		}
 		cfg, ok := awsCfg.(aws.Config)
 		if !ok {
 			return nil, fmt.Errorf("NewDeploymentEngine: expected aws.Config, got %T", awsCfg)
@@ -65,6 +68,9 @@ func init() {
 		return NewTofuAwsEngine(c, cfg)
 	}
 	cli.NewCDNEngine = func(c *cli.Config, awsCfg any) cli.CDNEngine {
+		if c.Deploy != nil && c.Deploy.Provider == cli.GCP {
+			return NewGcpCDN(c.Deploy.Providers.GCP.Project)
+		}
 		cfg, ok := awsCfg.(aws.Config)
 		if !ok {
 			return nil

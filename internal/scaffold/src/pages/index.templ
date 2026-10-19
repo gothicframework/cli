@@ -1,8 +1,7 @@
 package pages
 
 import (
-	"{{.GoModName}}/src/components"
-	"github.com/gothicframework/components"
+	gothicComponents "github.com/gothicframework/components"
 	"{{.GoModName}}/src/layouts"
 	routes "github.com/gothicframework/core/router"
 	"net/http"
@@ -10,7 +9,7 @@ import (
 
 /**
  * Define the type of props your page or component will receive.
- * 
+ *
  * This type must remain consistent across:
  * - `RouteConfig` (used to configure the route)
  * - `Middleware` (which injects the props)
@@ -50,17 +49,106 @@ var IndexConfig = routes.RouteConfig[IndexPageProps]{
 	},
 }
 
-
 templ Index(props IndexPageProps) {
-	@layouts.PageLayout() {
-		<div class="sm:w-[300px] sm:h-[300px] w-[200px] h-[200px] my-10 rounded-full animate-pulse overflow-clip">
-			@gothicComponents.OptimizedImage(gothicComponents.OptimizedImageProps{IsFirstLoad: true, ImgName: "imageExample", ImgExtension: "png", Alt: "Gothic Framework Logo"})
-		</div>
-		@components.HelloWorld(nil)
-		<div class="flex flex-col justify-center items-center max-w-xl text-center">
-			<p class="font-normal text-gray-400 text-base sm:text-xl">Do you want to build <span class="font-semibold text-white">Modern Web Apps</span> with the <span class="font-bold text-cyan-400 text-lg sm:text-2xl">Go</span> programing language as easy as if it was <span class="font-bold text-yellow-400 text-base sm:text-xl">Javascript</span>?</p>
-			<a target="_blank" class="font-bold text-black text-base sm:text-xl py-4 px-6 sm:px-10 bg-pink-500 hover:bg-pink-300 mt-20 rounded-md" href="https://gothicframework.com">See our docs</a>
-		</div>
+	@layouts.PageLayout(false) {
+		<section class="text-center pt-12 pb-8 max-w-xl">
+			<div class="mx-auto mb-6 w-28 h-28 rounded-full p-1 overflow-hidden bg-[linear-gradient(135deg,#2c2350,#14102b)] shadow-[0_0_30px_rgba(124,58,237,0.35)]">
+				<div class="w-full h-full rounded-full overflow-hidden bg-black">
+					@gothicComponents.OptimizedImage(gothicComponents.OptimizedImageProps{IsFirstLoad: true, ImgName: "imageExample", ImgExtension: "png", Alt: "Gothic Framework logo"})
+				</div>
+			</div>
+			<div class="font-mono text-[10px] tracking-[0.32em] text-pink-400 uppercase">YOUR APP IS RUNNING</div>
+			<h1 class="mt-3 text-4xl sm:text-5xl font-extrabold tracking-tight">Welcome to the Gothic Framework</h1>
+			<p class="mt-4 text-gray-400 text-base leading-relaxed">
+				A web framework made in <strong class="text-blue-300">Go</strong>. Fast, responsive, <strong class="text-pink-400">agent friendly</strong>.
+				Minimal JavaScript, Tailwind styling, and simple deploys on AWS, GCP, or your own server.
+			</p>
+			<div class="mt-8 flex flex-wrap justify-center gap-3">
+				<a href="https://gothicframework.com" target="_blank" class="inline-flex items-center justify-center px-7 py-3 rounded-full font-bold text-sm text-white bg-[linear-gradient(90deg,#ec4899,#7c3aed)] shadow-[0_8px_30px_rgba(236,72,153,0.30)] hover:brightness-110 transition">
+					READ THE DOCS ↗
+				</a>
+			</div>
+			<p class="mt-5 text-[13px] text-gray-500">
+				<a href="#features" class="hover:text-pink-400 transition-colors">Explore the features below ↓</a>
+			</p>
+		</section>
+
+		<section id="features" class="w-full max-w-3xl grid gap-4 sm:grid-cols-3 pb-6 scroll-mt-6">
+			<div class="p-6 flex flex-col items-start text-left rounded-2xl bg-[linear-gradient(160deg,#14102b,#0b0817)] border border-[#2c2350] shadow-[0_0_60px_rgba(124,58,237,0.10)]">
+				<div class="font-mono text-[10px] tracking-[0.28em] text-gray-500">01</div>
+				<h2 class="mt-2 text-[15px] font-bold">Client state in <span class="text-blue-300">Go</span></h2>
+				<p class="mt-2 text-[12px] text-gray-400 leading-relaxed">
+					The counter's reactivity is <strong class="text-blue-300">Go</strong>, compiled to <strong class="text-blue-300">WebAssembly</strong>. No handwritten JavaScript. The mirror beside it is <strong class="text-pink-400">shared state</strong> between components.
+				</p>
+				<div class="mt-auto pt-4 flex gap-4">
+					<a href="/counter" class="font-mono text-[11px] tracking-[0.12em] text-pink-400 hover:text-pink-500 transition-colors">PLAY →</a>
+					<a href="https://gothicframework.com/docs/wasm-observables" target="_blank" class="font-mono text-[11px] tracking-[0.12em] text-gray-500 hover:text-blue-300 transition-colors">DOCS ↗</a>
+				</div>
+			</div>
+			<div class="p-6 flex flex-col items-start text-left rounded-2xl bg-[linear-gradient(160deg,#14102b,#0b0817)] border border-[#2c2350] shadow-[0_0_60px_rgba(124,58,237,0.10)]">
+				<div class="font-mono text-[10px] tracking-[0.28em] text-gray-500">02</div>
+				<h2 class="mt-2 text-[15px] font-bold">ISR caching</h2>
+				<p class="mt-2 text-[12px] text-gray-400 leading-relaxed">
+					Known from Next.js: pages <strong class="text-blue-300">cached</strong> and <strong class="text-pink-400">revalidated in the background</strong> as data changes over time. Fast and SEO-friendly.
+				</p>
+				<div class="mt-auto pt-4 flex gap-4">
+					<a href="/revalidate" class="font-mono text-[11px] tracking-[0.12em] text-pink-400 hover:text-pink-500 transition-colors">PLAY →</a>
+					<a href="https://gothicframework.com/docs/isr-pages" target="_blank" class="font-mono text-[11px] tracking-[0.12em] text-gray-500 hover:text-blue-300 transition-colors">DOCS ↗</a>
+				</div>
+			</div>
+			<div class="p-6 flex flex-col items-start text-left rounded-2xl bg-[linear-gradient(160deg,#14102b,#0b0817)] border border-[#2c2350] shadow-[0_0_60px_rgba(124,58,237,0.10)]">
+				<div class="font-mono text-[10px] tracking-[0.28em] text-gray-500">03</div>
+				<h2 class="mt-2 text-[15px] font-bold">Reactive UI, <span class="text-blue-300">no JavaScript</span></h2>
+				<p class="mt-2 text-[12px] text-gray-400 leading-relaxed">
+					<strong class="text-white">Server-first</strong> reactivity: real HTML rendered in Go and swapped in place by <strong class="text-blue-300">HTMX</strong>. <strong class="text-pink-400">Zero handwritten JavaScript</strong>.
+				</p>
+				<div class="mt-auto pt-4 flex gap-4">
+					<a href="/htmx" class="font-mono text-[11px] tracking-[0.12em] text-pink-400 hover:text-pink-500 transition-colors">PLAY →</a>
+					<a href="https://gothicframework.com/docs/wasm-htmx" target="_blank" class="font-mono text-[11px] tracking-[0.12em] text-gray-500 hover:text-blue-300 transition-colors">DOCS ↗</a>
+				</div>
+			</div>
+			<div class="p-6 flex flex-col items-start text-left rounded-2xl bg-[linear-gradient(160deg,#14102b,#0b0817)] border border-[#2c2350] shadow-[0_0_60px_rgba(124,58,237,0.10)]">
+				<div class="font-mono text-[10px] tracking-[0.28em] text-gray-500">04</div>
+				<h2 class="mt-2 text-[15px] font-bold">Images + SEO</h2>
+				<p class="mt-2 text-[12px] text-gray-400 leading-relaxed">
+					A <strong class="text-blue-300">blur-up preview</strong> that <strong class="text-pink-400">fades into full resolution</strong> with zero layout shift. CDN-ready and SEO-friendly.
+				</p>
+				<div class="mt-auto pt-4 flex gap-4">
+					<a href="/images" class="font-mono text-[11px] tracking-[0.12em] text-pink-400 hover:text-pink-500 transition-colors">PLAY →</a>
+					<a href="https://gothicframework.com/docs/optimized-images" target="_blank" class="font-mono text-[11px] tracking-[0.12em] text-gray-500 hover:text-blue-300 transition-colors">DOCS ↗</a>
+				</div>
+			</div>
+<div class="p-6 flex flex-col items-start text-left rounded-2xl bg-[linear-gradient(160deg,#14102b,#0b0817)] border border-[#2c2350] shadow-[0_0_60px_rgba(124,58,237,0.10)]">
+				<div class="font-mono text-[10px] tracking-[0.28em] text-gray-500">05</div>
+				<h2 class="mt-2 text-[15px] font-bold">Agent friendly</h2>
+				<p class="mt-2 text-[12px] text-gray-400 leading-relaxed">
+					The Developer MCP gives your AI agent a <strong class="text-pink-400">360 view</strong>: it sees, builds and observes, with <strong class="text-white">zero setup</strong>.
+				</p>
+				<div class="mt-auto pt-4 flex gap-4">
+					<a href="/mcp" class="font-mono text-[11px] tracking-[0.12em] text-pink-400 hover:text-pink-500 transition-colors">PLAY →</a>
+					<a href="https://gothicframework.com" target="_blank" class="font-mono text-[11px] tracking-[0.12em] text-gray-500 hover:text-blue-300 transition-colors">DOCS ↗</a>
+				</div>
+			</div>
+			<div class="p-6 flex flex-col items-start text-left rounded-2xl bg-[linear-gradient(160deg,#14102b,#0b0817)] border border-[#2c2350] shadow-[0_0_60px_rgba(124,58,237,0.10)]">
+				<div class="font-mono text-[10px] tracking-[0.28em] text-gray-500">06</div>
+				<h2 class="mt-2 text-[15px] font-bold">Simple deploys</h2>
+				<p class="mt-2 text-[12px] text-gray-400 leading-relaxed">
+					Deploy to <strong class="text-blue-300">AWS</strong> or <strong class="text-blue-300">GCP</strong>, or run a <strong class="text-blue-300">single binary</strong> with Docker on any VPS. One command, generated infrastructure.
+				</p>
+				<div class="mt-auto pt-4 flex gap-4">
+					<a href="/deploy" class="font-mono text-[11px] tracking-[0.12em] text-pink-400 hover:text-pink-500 transition-colors">PLAY →</a>
+					<a href="https://gothicframework.com/docs/deployment-tool" target="_blank" class="font-mono text-[11px] tracking-[0.12em] text-gray-500 hover:text-blue-300 transition-colors">DOCS ↗</a>
+				</div>
+			</div>
+		</section>
+
+		<section class="w-full max-w-3xl pb-14">
+			<div class="px-5 py-4 flex flex-wrap items-center justify-center gap-3 border border-dashed border-[#2c2350] rounded-2xl bg-[rgba(20,16,43,0.35)]">
+				<span class="font-mono text-[10px] tracking-[0.28em] text-gray-500 uppercase">IN THE DEV LOOP</span>
+				<a href="https://gothicframework.com/docs/dev-cmd" target="_blank" class="inline-flex items-center gap-1.5 font-mono text-[11px] text-purple-300 bg-[#0d0a1e] border border-[#2c2350] rounded-lg px-3 py-1.5 hover:border-[#4c2d8f] transition-colors"><span class="text-pink-400">$</span> gothic hot-reload</a>
+				<a href="https://gothicframework.com/docs/optimized-images" target="_blank" class="inline-flex items-center gap-1.5 font-mono text-[11px] text-purple-300 bg-[#0d0a1e] border border-[#2c2350] rounded-lg px-3 py-1.5 hover:border-[#4c2d8f] transition-colors"><span class="text-pink-400">$</span> gothic optimize-images</a>
+				<a href="https://gothicframework.com/docs/deploy-cmds" target="_blank" class="inline-flex items-center gap-1.5 font-mono text-[11px] text-purple-300 bg-[#0d0a1e] border border-[#2c2350] rounded-lg px-3 py-1.5 hover:border-[#4c2d8f] transition-colors"><span class="text-pink-400">$</span> gothic deploy</a>
+			</div>
+		</section>
 	}
 }
-

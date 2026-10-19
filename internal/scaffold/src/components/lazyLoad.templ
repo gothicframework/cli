@@ -9,8 +9,8 @@ import (
  * `LazyLoadProps` defines the props passed to the `LazyLoad` component.
  *
  * It is a simple boolean value:
- * - `true` indicates the initial (placeholder) render — usually triggered from a full page render.
- * - `false` indicates the second load — when HTMX fetches the full content.
+ * - `true` indicates the initial (placeholder) render: usually triggered from a full page render.
+ * - `false` indicates the second load: when HTMX fetches the full content.
  */
 type LazyLoadProps = bool
 
@@ -19,7 +19,7 @@ type LazyLoadProps = bool
  *
  * - `Type`: Set to `STATIC` so responses can be cached by CDNs like CloudFront.
  * - `HttpMethod`: Uses `GET`, which aligns with HTMX's default behavior for fetching content.
- * - `Middleware`: In this case, always returns `false` — because it is only called via HTMX
+ * - `Middleware`: In this case, always returns `false`: because it is only called via HTMX
  *   after the initial placeholder render, meaning this is *not* the first load.
  *
  * Note: The first render with `true` should be triggered from a parent component or page.
@@ -52,10 +52,10 @@ var LazyLoadConfig = routes.RouteConfig[LazyLoadProps]{
  */
 templ LazyLoad(isFirstLoad LazyLoadProps) {
 	if isFirstLoad {
-		<div hx-get="/yourLazyLoadedComponent" hx-trigger="load" hx-swap="outerHTML">
-			<div>Put your skeleton loader or placeholder here for `/yourLazyLoadedComponent`</div>
+		<div hx-get="/components/lazyLoad" hx-trigger="load" hx-swap="outerHTML" class="w-full">
+			<div class="gothic-card p-8 text-center text-sm text-gray-500">Loading this real component from the server...</div>
 		</div>
 	} else {
-		<div>This is the actual content loaded after the placeholder</div>
+		<div class="gothic-card p-5">You swapped me: HTMX fetched this fragment over the wire.</div>
 	}
 }

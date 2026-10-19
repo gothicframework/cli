@@ -1,0 +1,22 @@
+{
+  "output": {
+    "cloud_run_service_name": {
+      "value": "${google_cloud_run_service.main.name}"
+    },
+    "cloud_run_service_url": {
+      "value": "${google_cloud_run_service.main.status[0].url}"
+    },
+    "custom_domain": {
+      "value": "${var.enable_domain_mapping ? local.custom_domain : \"\"}"
+    },
+    "custom_domain_record_name": {
+      "value": "${var.enable_domain_mapping ? one(google_cloud_run_domain_mapping.main[*].status[0].resource_records[0].name) : \"\"}"
+    },
+    "custom_domain_record_data": {
+      "value": "${var.enable_domain_mapping ? one(google_cloud_run_domain_mapping.main[*].status[0].resource_records[0].rrdata[0]) : \"\"}"
+    },
+    "gcs_bucket_name": {
+      "value": "${google_storage_bucket.main.name}"
+    }
+  }
+}

@@ -66,6 +66,7 @@ type Provider int
 
 const (
 	AWS Provider = iota
+	GCP
 )
 
 // DeployConfig mirrors config.DeployConfig: a provider selector plus per-provider
@@ -78,6 +79,7 @@ type DeployConfig struct {
 // Providers mirrors config.Providers.
 type Providers struct {
 	AWS AWSProvider `json:"aws"`
+	GCP GCPProvider `json:"gcp"`
 }
 
 // AWSProvider mirrors config.AWSProvider: the AWS-specific deploy settings.
@@ -100,4 +102,18 @@ type EnvVariables struct {
 	CertificateArn *config.EnvValue           `json:"certificateArn"`
 	WafArn         *config.EnvValue           `json:"wafArn"`
 	ENV            map[string]config.EnvValue `json:"env,omitempty"`
+}
+
+// GCPProvider mirrors config.GCPProvider: the GCP-specific deploy settings.
+type GCPProvider struct {
+	Project  string            `json:"project"`
+	Region   string            `json:"region"`
+	Stages   map[string]GCPStageEnv `json:"stages"`
+	Provider string            `json:"provider"` // "gcloud" — the CLI binary the user has installed
+}
+
+// GCPStageEnv mirrors the GCP stage config with ENV variables and custom domain.
+type GCPStageEnv struct {
+	CustomDomain *config.EnvValue `json:"customDomain,omitempty"`
+	ENV          map[string]config.EnvValue `json:"env,omitempty"`
 }

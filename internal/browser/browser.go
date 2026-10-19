@@ -77,6 +77,11 @@ type Options struct {
 	// StepTimeout overrides DefaultStepTimeout when positive.
 	StepTimeout time.Duration
 
+	// PinResizePoll overrides the pinned-viewport user-resize watch interval
+	// when positive. Tests shorten it; production leaves it zero and takes
+	// the package default.
+	PinResizePoll time.Duration
+
 	// BinPath forces a specific browser executable, bypassing
 	// launcher.LookPath and downloads. A test seam; production leaves it
 	// empty.
@@ -111,14 +116,14 @@ type Manager struct {
 
 	// pinned is the device-metrics override SetViewport armed on the page
 	// (nil = the browser's own window size). It outlives navigations and is
-	// re-applied on every relaunch; ClearViewport lifts it. restoreBounds
-	// holds the headful window's pre-pin geometry so the clear path hands
-	// the window back the way the maintainer had it. frameOverhead is the
-	// launch-time window-frame cost (outer minus content), measured while
+	// re-applied on every relaunch; ClearViewport lifts it; a manual window
+	// resize by the maintainer lifts it too (see pinWatch). frameOverhead is
+	// the launch-time window-frame cost (outer minus content), measured while
 	// no override is armed, so a pin can size the outer window exactly.
-	pinned        *proto.EmulationSetDeviceMetricsOverride
-	restoreBounds *proto.BrowserBounds
-	frameOverhead [2]int
+	pinned         *proto.EmulationSetDeviceMetricsOverride
+	pinnedEmulates bool
+	pinWatchStop   chan struct{}
+	frameOverhead  frameOverhead
 
 	// console is the retained page-console ring (see console.go); consoleMu
 	// guards it.
@@ -304,10 +309,21 @@ func (m *Manager) launchLocked() (*rod.Page, error) {
 	// toggles. Best effort — a CDP flake on re-apply must not take the whole
 	// browser down; the pin stays armed for the next relaunch.
 	if m.pinned != nil {
-		_ = m.pinned.Call(page)
-		// The headful window that just relaunched also gets the pin's
-		// geometry, so the emulation fills the window again.
-		m.matchWindowToViewport(page, m.pinned.Width, m.pinned.Height)
+		if m.pinnedEmulates {
+			// Same order as SetViewport: the relaunched headful window first
+			// gets its real size (honest feedback, no emulation armed), then
+			// the override re-arms on top of the matching content area.
+			if !m.opts.Headless {
+				_ = m.pinWindowTo(page, m.pinned.Width, m.pinned.Height)
+			}
+			_ = m.pinned.Call(page)
+		} else if !m.opts.Headless {
+			// Window pin: the relaunched window goes back to the pinned
+			// real size; the emulation-free path keeps the app mirroring.
+			_ = m.pinWindowTo(page, m.pinned.Width, m.pinned.Height)
+		}
+		// And the maintainer keeps control of the relaunch too.
+		m.startPinWatchLocked()
 	} else {
 		// Measure the window-frame overhead (outer size minus the content
 		// area) on a clean, unpinned launch: once a device-metrics override
@@ -315,6 +331,22 @@ func (m *Manager) launchLocked() (*rod.Page, error) {
 		// content area, so a pin-time measurement can never converge. The
 		// overhead is what lets a later pin size the outer window exactly.
 		m.frameOverhead = measureFrameOverhead(page)
+		// The session's first window is the maintainer's working canvas:
+		// give it the whole screen (headful), no dead space anywhere.
+		if !m.opts.Headless {
+			if info, err := (proto.BrowserGetWindowForTarget{}).Call(page); err == nil {
+				_ = (proto.BrowserSetWindowBounds{
+					WindowID: info.WindowID,
+					Bounds:   &proto.BrowserBounds{WindowState: proto.BrowserWindowStateMaximized},
+				}).Call(page)
+				// The renderer can lag a fresh maximize (a Linux-Chrome
+				// native-window/layout desync); the page is still blank here,
+				// so the relayout kick and its reload cost nothing and the
+				// first paint already fills the screen.
+				time.Sleep(150 * time.Millisecond)
+				_ = forceRelayout(page)
+			}
+		}
 	}
 
 	// Retain the page's console errors/warnings for the audit and logs tools.
@@ -389,6 +421,7 @@ func (m *Manager) idleClose() {
 // leakless, so even if a teardown step errors nothing is left running.
 // Callers hold m.mu. On return the fields are nil and a later call relaunches.
 func (m *Manager) closeBrowserLocked() {
+	m.stopPinWatcherLocked()
 	if m.idleTimer != nil {
 		m.idleTimer.Stop()
 		m.idleTimer = nil
@@ -447,13 +480,19 @@ func (m *Manager) Running() bool {
 	return m.page != nil
 }
 
-// SetViewport pins a device-metrics override on the managed page until
-// ClearViewport: the agent keeps the browser in one configuration (say a
-// 375px mobile viewport) across navigations, probes, and captures. CDP's
-// override outlives navigations within the target; the manager re-applies it
-// after any relaunch. A non-positive height keeps the page's current height
-// (CDP replaces both dimensions at once, so the pin must carry an explicit
-// pair).
+// SetViewport pins the agent's configuration until ClearViewport or the
+// maintainer's own window resize (see pinWatch), with two mechanisms:
+//
+//   - headful + non-mobile: the REAL WINDOW is resized until its real content
+//     area equals the requested pair — converging feedback, correct on any
+//     scale factor; no emulation geometry is involved, so the page IS the
+//     window and dead space is impossible.
+//   - headless or mobile: CDP's device-metrics override emulates the pair
+//     (headless has no window; mobile needs the DPR/UA simulation), and the
+//     headful mobile window is sized to host the canvas.
+//
+// A non-positive height keeps the current pair; CDP emulation resets both
+// dimensions at once, so the pin resolves an explicit height.
 func (m *Manager) SetViewport(width, height int, mobile bool) error {
 	if width <= 0 {
 		return errors.New("set viewport: width must be a positive pixel count")
@@ -464,6 +503,29 @@ func (m *Manager) SetViewport(width, height int, mobile bool) error {
 	if err != nil {
 		return err
 	}
+
+	// Headful desktop pin: the ONLY mechanism is a real window resize.
+	if !m.opts.Headless && !mobile {
+		if height <= 0 {
+			inner, err := realDims(page)
+			if err != nil {
+				return err
+			}
+			height = int(inner[1])
+		}
+		m.pinned = &proto.EmulationSetDeviceMetricsOverride{Width: width, Height: height}
+		m.pinnedEmulates = false
+		if err := m.pinWindowTo(page, width, height); err != nil {
+			m.pinned = nil
+			return err
+		}
+		m.stopPinWatcherLocked()
+		m.startPinWatchLocked()
+		m.armIdleLocked()
+		return nil
+	}
+
+	// Emulated pin (headless, or headful mobile): CDP device-metrics override.
 	if height <= 0 {
 		dims, err := viewportDims(page)
 		if err != nil {
@@ -477,94 +539,376 @@ func (m *Manager) SetViewport(width, height int, mobile bool) error {
 		DeviceScaleFactor: 1,
 		Mobile:            mobile,
 	}
+	// Headful mobile: resize the REAL window FIRST, with no emulation armed —
+	// the feedback loop reads the honest content area and lands the window as
+	// close to (width, height) as the window manager allows (WMs enforce a
+	// minimum width, so a 390px canvas may leave a strip). Only then arm the
+	// override, and paint the webview background with the app's own body
+	// colour — the leftover strip then blends into the app instead of reading
+	// as a broken gray area.
+	if !m.opts.Headless {
+		m.frameOverhead = measureFrameOverhead(page)
+		if err := m.pinWindowTo(page, width, height); err != nil {
+			return err
+		}
+	}
 	if err := ovr.Call(page); err != nil {
 		return fmt.Errorf("pin viewport %dx%d: %w", width, height, err)
 	}
-	// Capture the pre-pin window geometry so ClearViewport can put the
-	// maintainer's window back, then make the window fill the emulation.
-	if m.pinned == nil && !m.opts.Headless {
-		if info, err := (proto.BrowserGetWindowForTarget{}).Call(page); err == nil {
-			m.restoreBounds = info.Bounds
-		}
-	}
-	m.matchWindowToViewport(page, width, height)
 	m.pinned = &ovr
+	m.pinnedEmulates = true
+	if !m.opts.Headless {
+		m.matchWebviewBackground(page)
+	}
+	// Restart the user-resize watcher with a fresh baseline, so the window
+	// moves it just made are not mistaken for the maintainer's hands.
+	m.stopPinWatcherLocked()
+	m.startPinWatchLocked()
 	m.armIdleLocked()
 	return nil
 }
 
-// matchWindowToViewport resizes a HEADFUL window so the emulated viewport
-// fills it. CDP's device-metrics override renders the page at the pinned
-// size inside whatever window exists; without this the maintainer sees the
-// page canvas shrunk into a corner of a much larger window and empty space
-// everywhere else — it reads as a broken layout but is emulation geometry.
-// Outer sizing needs the window-frame overhead (title/URL bars sit outside
-// the viewport); the launch path measures it while no override is armed,
-// because with a pin active innerHeight reports the EMULATED height and can
-// never drive a correction. Without a measurement the estimator keeps the
-// pre-fix two-pass shape (best effort, can overshoot height).
-func (m *Manager) matchWindowToViewport(page *rod.Page, width, height int) {
-	if m.opts.Headless {
-		return
-	}
-	var outerW, outerH int
-	if m.frameOverhead[0] > 0 || m.frameOverhead[1] > 0 {
-		outerW = width + m.frameOverhead[0]
-		outerH = height + m.frameOverhead[1]
-	} else {
-		const initialFrameAllowance = 160
-		outerW, outerH = width, height+initialFrameAllowance
-	}
-	info, err := (proto.BrowserGetWindowForTarget{}).Call(page)
-	if err != nil {
-		return
-	}
-	bounds := &proto.BrowserBounds{Width: &outerW, Height: &outerH, WindowState: proto.BrowserWindowStateNormal}
-	_ = (proto.BrowserSetWindowBounds{WindowID: info.WindowID, Bounds: bounds}).Call(page)
-}
-
-// measureFrameOverhead reads the live window's outer size minus its content
-// area — honest numbers only while no device-metrics override is armed (inner
-// dims then report the real content area). nil when any read fails or the
-// numbers are implausible; the caller then falls back to the rough estimator.
-func measureFrameOverhead(page *rod.Page) [2]int {
-	res, err := page.Eval(`() => JSON.stringify({ow: outerWidth, iw: innerWidth, oh: outerHeight, ih: innerHeight})`)
-	if err != nil {
-		return [2]int{}
-	}
-	var raw struct{ OW, IW, OH, IH float64 }
-	if json.Unmarshal([]byte(res.Value.Str()), &raw) != nil {
-		return [2]int{}
-	}
-	ow, iw := int(raw.OW), int(raw.IW)
-	oh, ih := int(raw.OH), int(raw.IH)
-	if ow <= iw || oh <= ih || iw <= 0 || ih <= 0 {
-		return [2]int{}
-	}
-	return [2]int{ow - iw, oh - ih}
-}
-
-// ClearViewport lifts a pinned override and restores the browser's own window
-// size. With no pin and no running page it is a clean no-op; with a pin but
-// no running page the pin is dropped so a later launch starts unpinned.
+// ClearViewport lifts a pinned override and returns the browser window to its
+// maximized state — the headful default. With no pin and no running page it is
+// a clean no-op; with a pin but no running page the pin is dropped so a later
+// launch starts unpinned.
 func (m *Manager) ClearViewport() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.stopPinWatcherLocked()
 	if m.page != nil {
 		// SetViewport(nil) issues Emulation.clearDeviceMetricsOverride.
 		if err := m.page.SetViewport(nil); err != nil {
 			return fmt.Errorf("clear viewport: %w", err)
 		}
-		// Headful sessions gave the window to the emulation (the pin
-		// resized it); hand the maintainer's window geometry back.
-		if !m.opts.Headless && m.restoreBounds != nil {
+		// Headful default: the window goes back to maximized (its own real
+		// viewport), so manual resizing by the maintainer is live again.
+		if !m.opts.Headless {
 			if info, err := (proto.BrowserGetWindowForTarget{}).Call(m.page); err == nil {
-				_ = (proto.BrowserSetWindowBounds{WindowID: info.WindowID, Bounds: m.restoreBounds}).Call(m.page)
+				_ = (proto.BrowserSetWindowBounds{
+					WindowID: info.WindowID,
+					Bounds:   &proto.BrowserBounds{WindowState: proto.BrowserWindowStateMaximized},
+				}).Call(m.page)
 			}
 		}
 		m.armIdleLocked()
 	}
 	m.pinned = nil
-	m.restoreBounds = nil
 	return nil
+}
+
+// pinResizePollInterval is how often the pinned-viewport watcher reads the
+// window's outer size to detect a maintainer's manual resize. Package-level
+// so tests can shorten it.
+var pinResizePollInterval = 400 * time.Millisecond
+
+// pinResizePollLocked returns the watcher tick, honoring the test override.
+func (m *Manager) pinResizePoll() time.Duration {
+	if m.opts.PinResizePoll > 0 {
+		return m.opts.PinResizePoll
+	}
+	return pinResizePollInterval
+}
+
+// startPinWatchLocked, called after the pin is armed (headful only), starts
+// the watcher that keeps the MAINTAINER in control: whenever the real window
+// is resized by hand (drag handle, snap, restore, maximize), the emulation is
+// lifted so the page mirrors the window again. The device-metrics canvas is
+// otherwise frozen at the pinned size and reads as a broken, non-responsive
+// app. The window's own size is never touched by the watcher — the
+// maintainer's geometry stands. The watcher also clears an UNTRACKED override
+// (a capture error path or a foreign tool can leave one armed while
+// m.pinned is nil): clearing an override that isn't armed is a harmless no-op.
+// Callers hold m.mu. When the pin is armed and nothing changed, the watcher
+// exits silently at pin clear, teardown, or manager close.
+func (m *Manager) startPinWatchLocked() {
+	if m.opts.Headless || m.pinWatchStop != nil || m.page == nil {
+		return
+	}
+	stop := make(chan struct{})
+	m.pinWatchStop = stop
+	page := m.page
+	poll := m.pinResizePoll()
+	go func() {
+		// Settle first: after a programmatic unmaximize the WM (e.g. GNOME
+		// restore-tiling, snap decisions) keeps adjusting the frame for a few
+		// hundred ms. A baseline taken during that dance would read as the
+		// maintainer's hands and lift the pin spuriously — adopt the baseline
+		// only once the outer size is stable across the settle tick, bounded
+		// by the budget.
+		// settle tick AND budget scale with the poll interval so tests
+		// (60ms poll) settle quickly while production (400ms) waits out the
+		// window-manager's restore-tiling dance.
+		settle := time.NewTicker(poll)
+		defer settle.Stop()
+		budget := time.Now().Add(8 * poll)
+		last, ok := m.watcherOuterDims(page)
+		if !ok {
+			return
+		}
+		for time.Now().Before(budget) {
+			select {
+			case <-stop:
+				return
+			case <-settle.C:
+			}
+			cur, ok := m.watcherOuterDims(page)
+			if !ok {
+				return
+			}
+			if cur[0] == last[0] && cur[1] == last[1] {
+				break
+			}
+			last = cur
+		}
+		ticker := time.NewTicker(poll)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+			m.mu.Lock()
+			if m.pinned == nil || m.page != page || m.closed {
+				m.mu.Unlock()
+				return
+			}
+			dims, err := outerDims(page)
+			if err == nil && (dims[0] != last[0] || dims[1] != last[1]) {
+				// The maintainer moved the window: lift the emulation —
+				// even the untracked-armed case, since clearing a clear is
+				// a no-op. The window keeps its new geometry. A fresh
+				// measurement of the frame overhead is honest from here:
+				// the override for our pin is now (or just) gone.
+				last = dims
+				_ = page.SetViewport(nil)
+				m.pinned = nil
+				m.frameOverhead = measureFrameOverhead(page)
+				m.stopPinWatcherLocked()
+				m.mu.Unlock()
+				return
+			}
+			m.mu.Unlock()
+		}
+	}()
+}
+
+// watcherOuterDims reads the window's outer size for the watcher. ok=false
+// ends the watcher contract (bad read, different page, pin gone, closed).
+func (m *Manager) watcherOuterDims(page *rod.Page) ([2]int, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.pinned == nil || m.page != page || m.closed {
+		return [2]int{}, false
+	}
+	dims, err := outerDims(page)
+	if err != nil {
+		return [2]int{}, false
+	}
+	return dims, true
+}
+
+// stopPinWatcherLocked stops the user-resize watcher. Callers hold m.mu.
+func (m *Manager) stopPinWatcherLocked() {
+	if m.pinWatchStop != nil {
+		close(m.pinWatchStop)
+		m.pinWatchStop = nil
+	}
+}
+
+// outerDims reads the window's REAL outer size — width and height only, so a
+// window move without a resize does not count as maintainer action.
+func outerDims(page *rod.Page) ([2]int, error) {
+	res, err := page.Eval(`() => JSON.stringify({ow: outerWidth, oh: outerHeight})`)
+	if err != nil {
+		return [2]int{}, fmt.Errorf("read outer dims: %w", err)
+	}
+	var raw struct{ OW, OH float64 }
+	if json.Unmarshal([]byte(res.Value.Str()), &raw) != nil {
+		return [2]int{}, fmt.Errorf("parse outer dims")
+	}
+	return [2]int{int(raw.OW), int(raw.OH)}, nil
+}
+
+func absInt(a int) int {
+	if a < 0 {
+		return -a
+	}
+	return a
+}
+
+// realDims reads the page's real innerWidth/innerHeight — honest only while
+// no CDP device-metrics override is armed.
+func realDims(page *rod.Page) ([2]float64, error) {
+	res, err := page.Eval(`() => JSON.stringify({w: innerWidth, h: innerHeight})`)
+	if err != nil {
+		return [2]float64{}, fmt.Errorf("read real viewport: %w", err)
+	}
+	var raw struct{ W, H float64 }
+	if json.Unmarshal([]byte(res.Value.Str()), &raw) != nil {
+		return [2]float64{}, fmt.Errorf("parse real viewport")
+	}
+	return [2]float64{raw.W, raw.H}, nil
+}
+
+func (m *Manager) pinWindowTo(page *rod.Page, width, height int) error {
+	ok := m.pinWindowFeedback(page, width, height)
+	if ok {
+		return nil
+	}
+	// The renderer sometimes desyncs from the native window on Linux WMs: the
+	// window reports the requested bounds while the page layout (innerWidth/
+	// innerHeight) stays frozen at an older size, which reads as "huge window,
+	// tiny canvas". A forced relayout — a brief emulation cycle plus a reload
+	// (the page re-inits at the current window) — resyncs it; then converge.
+	_ = forceRelayout(page)
+	_ = m.pinWindowFeedback(page, width, height)
+	return nil
+}
+
+// pinWindowFeedback resizes the real window until its real content area equals
+// (width, height) a pixel. A converging feedback loop, deliberately NOT
+// arithmetic on measured frames: report units differ between displays
+// (physical px outside, CSS px inside), scale factors differ, and window
+// managers choreograph; each pass reads the POST-set state and corrects the
+// remaining error, so any fixed gap (scale factor, frame units, WM margins)
+// cancels algebraically. At most pinWindowMaxPasses passes; reported false
+// when the passes end with the pair still off (the caller then relayouts).
+// The window ends normal: maximize and an exact size contradict.
+func (m *Manager) pinWindowFeedback(page *rod.Page, width, height int) bool {
+	const maxPasses = 3
+	for pass := 0; pass < maxPasses; pass++ {
+		// Give the window manager a beat before each read so the POST-set
+		// state is what this pass measures (the source of convergence).
+		if pass > 0 {
+			time.Sleep(150 * time.Millisecond)
+		}
+		inner, err := realDims(page)
+		if err != nil {
+			return false
+		}
+		dw := width - int(inner[0])
+		dh := height - int(inner[1])
+		if pass > 0 && absInt(dw) <= 2 && absInt(dh) <= 2 {
+			// Converged — or the WM refuses a finer step; stand pat.
+			return true
+		}
+		info, err := (proto.BrowserGetWindowForTarget{}).Call(page)
+		if err != nil {
+			return false
+		}
+		newW := width
+		newH := height
+		if info.Bounds.Width != nil {
+			newW = *info.Bounds.Width + dw
+		}
+		if info.Bounds.Height != nil {
+			newH = *info.Bounds.Height + dh
+		}
+		// A negative correction (inner reads larger than the window bounds —
+		// a report-unit mismatch mid-transition) degrades to the absolute
+		// request; the next pass's feedback pass converges from there.
+		if newW <= 0 {
+			newW = width
+		}
+		if newH <= 0 {
+			newH = height
+		}
+		// Restore from maximized first: a combined restore+size call is
+		// ignored by some Chrome builds; the plain state set is not.
+		if info.Bounds.WindowState != proto.BrowserWindowStateNormal {
+			_ = (proto.BrowserSetWindowBounds{
+				WindowID: info.WindowID,
+				Bounds:   &proto.BrowserBounds{WindowState: proto.BrowserWindowStateNormal},
+			}).Call(page)
+			time.Sleep(150 * time.Millisecond)
+		}
+		bounds := &proto.BrowserBounds{Width: &newW, Height: &newH, WindowState: proto.BrowserWindowStateNormal}
+		if err := (proto.BrowserSetWindowBounds{WindowID: info.WindowID, Bounds: bounds}).Call(page); err != nil {
+			return false
+		}
+	}
+	inner, err := realDims(page)
+	if err != nil {
+		return false
+	}
+	return absInt(width-int(inner[0])) <= 2 && absInt(height-int(inner[1])) <= 2
+}
+
+// matchWebviewBackground paints the webview's leftover area with the page's
+// own body background colour: a mobile-emulation canvas narrower than the
+// window's enforced minimum reads its remainder as Chrome's default gray —
+// with the app's own colour there the strip disappears into the layout.
+// Best effort: any failure just leaves Chrome's default.
+func (m *Manager) matchWebviewBackground(page *rod.Page) {
+	res, err := page.Eval(`() => getComputedStyle(document.body).backgroundColor`)
+	if err != nil {
+		return
+	}
+	var css [4]float64
+	if _, err := fmt.Sscanf(res.Value.Str(), "rgb(%f, %f, %f)", &css[0], &css[1], &css[2]); err != nil {
+		if _, err := fmt.Sscanf(res.Value.Str(), "rgba(%f, %f, %f, %f)", &css[0], &css[1], &css[2], &css[3]); err != nil {
+			return
+		}
+	}
+	a := 255.0
+	color := &proto.DOMRGBA{
+		R: int(css[0]), G: int(css[1]), B: int(css[2]), A: &a,
+	}
+	_ = (proto.EmulationSetDefaultBackgroundColorOverride{Color: color}).Call(page)
+}
+
+// forceRelayout kicks the renderer into re-laying out at the window's current
+// native size: a brief device-metrics cycle plus a reload — both cheap, and
+// the reload re-initializes the page at the CURRENT window (a Linux-Chrome
+// desync leaves the layout frozen at an older window otherwise; see
+// pinWindowTo's rationale).
+func forceRelayout(page *rod.Page) error {
+	ovr := proto.EmulationSetDeviceMetricsOverride{DeviceScaleFactor: 1}
+	if err := ovr.Call(page); err != nil {
+		return err
+	}
+	_ = page.SetViewport(nil)
+	return page.Reload()
+}
+
+// frameOverhead is the window chrome cost measured at launch (or right before
+// a pin): title/URL/tab bars measured in CSS px, plus the window's
+// devicePixelRatio so the pin math can land DEVICE-px outer bounds (Chrome
+// reports outerWidth in physical px and innerWidth in CSS px on scaled
+// displays — the mismatch that made unscaled math fail on 2× setups). DPR 0
+// means the measurement failed.
+type frameOverhead struct {
+	W, H int
+	DPR  float64
+}
+
+func (f frameOverhead) valid() bool { return f.DPR > 0 && (f.W > 0 || f.H > 0) }
+
+// measureFrameOverhead reads the live window's frame cost (outer minus
+// content) in CSS px and the window's devicePixelRatio — honest numbers only
+// while no device-metrics override is armed (inner dims then report the real
+// content area). Zero frameOverhead when any read fails or the numbers are
+// implausible; the caller then falls back to the rough estimator.
+func measureFrameOverhead(page *rod.Page) frameOverhead {
+	res, err := page.Eval(`() => JSON.stringify({ow: outerWidth, iw: innerWidth, oh: outerHeight, ih: innerHeight, dpr: window.devicePixelRatio})`)
+	if err != nil {
+		return frameOverhead{}
+	}
+	var raw struct{ OW, IW, OH, IH, DPR float64 }
+	if json.Unmarshal([]byte(res.Value.Str()), &raw) != nil {
+		return frameOverhead{}
+	}
+	if raw.DPR <= 0 {
+		raw.DPR = 1
+	}
+	// Normalize the outer (physical) dims to CSS px for the frame math.
+	ow := int(raw.OW / raw.DPR)
+	oh := int(raw.OH / raw.DPR)
+	iw, ih := int(raw.IW), int(raw.IH)
+	if ow <= iw || oh <= ih || iw <= 0 || ih <= 0 {
+		return frameOverhead{}
+	}
+	return frameOverhead{W: ow - iw, H: oh - ih, DPR: raw.DPR}
 }

@@ -1,0 +1,55 @@
+package pages
+
+import (
+	"{{.GoModName}}/src/components"
+	"{{.GoModName}}/src/layouts"
+	"net/http"
+	routes "github.com/gothicframework/core/router"
+)
+
+type ImagesPageProps = interface{}
+
+var ImagesConfig = routes.RouteConfig[ImagesPageProps]{
+	Type:       routes.STATIC,
+	HttpMethod: routes.GET,
+	Middleware: func(w http.ResponseWriter, r *http.Request) ImagesPageProps {
+		return nil
+	},
+}
+
+
+templ Images(props ImagesPageProps) {
+	@layouts.PageLayout(true) {
+		<section class="text-center pt-12 pb-8 max-w-xl">
+			<div class="font-mono text-[10px] tracking-[0.32em] text-pink-400 uppercase">FEATURE 04 · IMAGES + SEO</div>
+			<h1 class="mt-2 text-3xl sm:text-4xl font-extrabold">Images that sharpen themselves</h1>
+			<p class="mt-3 text-gray-400 text-sm sm:text-base max-w-md mx-auto leading-relaxed">
+				On the left, Gothic's OptimizedImage: the image space is <strong class="text-blue-300">reserved</strong>, a blurred preview <strong class="text-pink-400">fades into focus</strong>, and <strong class="text-white">nothing moves</strong>. On the right, a plain img tag pops in and <strong class="text-pink-400">shoves the page around</strong>: a classic <strong class="text-white">layout shift</strong> that drags your <strong class="text-blue-300">SEO score</strong> down, worse still from a CDN. Hit refresh and watch both.
+			</p>
+		</section>
+
+		<div class="mb-2">
+			<a href="/" class="inline-flex items-center justify-center px-5 py-2.5 rounded-full border border-[#2c2350] text-purple-300 font-mono text-[12px] hover:border-[#4c2d8f] hover:text-[#e9d5ff] transition-colors">← BACK TO OVERVIEW</a>
+		</div>
+
+		<div id="image-demo" class="w-full flex justify-center items-center">
+			@components.ImageDemo(nil)
+		</div>
+
+		<div hx-get="/components/imageDemo" hx-trigger="every 5s" hx-target="#image-demo" hx-swap="innerHTML" class="hidden"></div>
+
+		<section class="mt-2 pb-8 flex flex-col items-center gap-3">
+			<a href="/images" class="inline-flex items-center gap-2 justify-center px-6 py-2.5 rounded-full font-mono text-[12px] tracking-[0.14em] text-white bg-[linear-gradient(90deg,#ec4899,#7c3aed)] shadow-[0_0_30px_rgba(124,58,237,0.35)] hover:brightness-110 transition-all">REFRESH ↺ REPLAY THE FADE</a>
+			<div class="flex flex-wrap gap-2 justify-center items-center">
+				<span class="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.14em] text-[#a78bfa] border border-[#2c2350] bg-[#0d0a1e] rounded-full px-3 py-1.5"><span class="text-pink-400">●</span> ZERO LAYOUT SHIFT</span>
+				<span class="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.14em] text-[#a78bfa] border border-[#2c2350] bg-[#0d0a1e] rounded-full px-3 py-1.5"><span class="text-pink-400">●</span> 8K ORIGINAL ON DISK</span>
+			</div>
+		</section>
+
+		<section class="w-full max-w-xl pb-14 flex flex-wrap gap-2 justify-center items-center">
+			<span class="font-mono text-[10px] tracking-[0.28em] text-gray-500 uppercase">DOCS:</span>
+			<a href="https://gothicframework.com/docs/optimized-images" target="_blank" class="inline-flex items-center font-mono text-[10px] tracking-[0.14em] text-blue-300 border border-[#2c2350] rounded-full px-3 py-1.5 hover:border-[#4c2d8f] hover:text-purple-300 transition-colors">OPTIMIZED IMAGES</a>
+			<a href="https://gothicframework.com/docs/cdn-caching" target="_blank" class="inline-flex items-center font-mono text-[10px] tracking-[0.14em] text-blue-300 border border-[#2c2350] rounded-full px-3 py-1.5 hover:border-[#4c2d8f] hover:text-purple-300 transition-colors">CDN CACHING</a>
+		</section>
+	}
+}

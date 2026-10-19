@@ -8,7 +8,7 @@ import (
 )
 
 /**
- * 💡 Gothic Framework supports JSON-based API routes — similar to Next.js’s `/api` folder concept.
+ * 💡 Gothic Framework supports JSON-based API routes: similar to Next.js’s `/api` folder concept.
  *
  * You can define lightweight REST-style endpoints using `ApiRouteConfig` and a regular Go handler function.
  * This allows you to keep backend logic co-located with your frontend code while benefiting from serverless scalability.
@@ -26,7 +26,7 @@ type HelloWorldResponse struct {
  * `HelloWorldConfig` registers this handler as an API route.
  *
  * - `HttpMethod`: Specifies that this endpoint handles HTTP GET requests.
- * - `Type`: Controls caching behavior — routes.DYNAMIC (default, no caching),
+ * - `Type`: Controls caching behavior: routes.DYNAMIC (default, no caching),
  *   routes.STATIC (cached forever), or routes.ISR (cached with TTL).
  * - `RevalidateInSec`: When Type is ISR, sets the TTL in seconds for cache entries.
  *

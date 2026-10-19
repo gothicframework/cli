@@ -1,0 +1,101 @@
+package components
+
+import (
+	routes "github.com/gothicframework/core/router"
+	"net/http"
+)
+
+type McpSetupProps = string
+
+var McpSetupConfig = routes.RouteConfig[McpSetupProps]{
+	Type:       routes.DYNAMIC,
+	HttpMethod: routes.GET,
+	Middleware: func(w http.ResponseWriter, r *http.Request) McpSetupProps {
+		client := r.URL.Query().Get("client")
+		switch client {
+		case "opencode", "codex", "cursor":
+			return client
+		default:
+			return "claude"
+		}
+	},
+}
+
+// Constant, hand-colored snippets (templ.Raw renders them unescaped; the
+// newlines and spans are written literally, so the blocks keep their shape).
+var mcpSnippetClaude = `<span class="text-purple-300">claude mcp add</span> <span class="text-gray-400">--transport http</span> <span class="text-blue-300">gothic-dev</span> \
+  <span class="text-pink-400">http://127.0.0.1:3000/_gothicframework/mcp</span>`
+
+var mcpSnippetOpenCode = `<span class="text-gray-400">"mcp": {</span>
+  <span class="text-gray-400">"servers": {</span>
+    <span class="text-blue-300">"gothic-dev"</span><span class="text-gray-400">: {</span>
+      <span class="text-purple-300">"type"</span><span class="text-gray-400">:</span> <span class="text-gray-400">"remote",</span>
+      <span class="text-purple-300">"url"</span><span class="text-gray-400">:</span> <span class="text-pink-400">"http://127.0.0.1:3000/_gothicframework/mcp"</span>
+    <span class="text-gray-400">}</span>
+  <span class="text-gray-400">}</span>
+<span class="text-gray-400">}</span>`
+
+var mcpSnippetCodex = `<span class="text-gray-400"># ~/.codex/config.toml</span>
+<span class="text-purple-300">[mcp_servers.gothic-dev]</span>
+<span class="text-purple-300">url</span> <span class="text-gray-400">=</span> <span class="text-pink-400">"http://127.0.0.1:3000/_gothicframework/mcp"</span>`
+
+var mcpSnippetCursor = `<span class="text-gray-400">// .cursor/mcp.json</span>
+<span class="text-gray-400">{</span>
+  <span class="text-purple-300">"mcpServers"</span><span class="text-gray-400">: {</span>
+    <span class="text-blue-300">"gothic-dev"</span><span class="text-gray-400">: {</span>
+      <span class="text-purple-300">"url"</span><span class="text-gray-400">:</span> <span class="text-pink-400">"http://127.0.0.1:3000/_gothicframework/mcp"</span>
+    <span class="text-gray-400">}</span>
+  <span class="text-gray-400">}</span>
+<span class="text-gray-400">}</span>`
+
+func mcpSnippetFor(client string) string {
+	if client == "opencode" {
+		return mcpSnippetOpenCode
+	}
+	if client == "codex" {
+		return mcpSnippetCodex
+	}
+	if client == "cursor" {
+		return mcpSnippetCursor
+	}
+	return mcpSnippetClaude
+}
+
+func mcpTabHref(client string) string {
+	return "/components/mcpSetup?client=" + client
+}
+
+const mcpTabActiveClass = "inline-flex items-center px-4 py-2 rounded-full font-mono text-[11px] tracking-[0.14em] text-white bg-[linear-gradient(90deg,#ec4899,#7c3aed)] shadow-[0_0_20px_rgba(124,58,237,0.30)]"
+
+const mcpTabGhostClass = "inline-flex items-center px-4 py-2 rounded-full font-mono text-[11px] tracking-[0.14em] text-[#8b8fa3] border border-[#2c2350] bg-[#0d0a1e] hover:text-pink-400 hover:border-[#4c2d8f] transition-colors"
+
+templ McpSetup(active McpSetupProps) {
+	<div id="mcp-setup" class="w-full flex flex-col items-center">
+		<div class="flex flex-wrap justify-center gap-2">
+			if active == "claude" {
+				<a href={ templ.URL(mcpTabHref("claude")) } hx-get={ templ.URL(mcpTabHref("claude")) } hx-target="#mcp-setup" hx-swap="outerHTML" class={ mcpTabActiveClass }>CLAUDE CODE</a>
+			} else {
+				<a href={ templ.URL(mcpTabHref("claude")) } hx-get={ templ.URL(mcpTabHref("claude")) } hx-target="#mcp-setup" hx-swap="outerHTML" class={ mcpTabGhostClass }>CLAUDE CODE</a>
+			}
+			if active == "opencode" {
+				<a href={ templ.URL(mcpTabHref("opencode")) } hx-get={ templ.URL(mcpTabHref("opencode")) } hx-target="#mcp-setup" hx-swap="outerHTML" class={ mcpTabActiveClass }>OPENCODE</a>
+			} else {
+				<a href={ templ.URL(mcpTabHref("opencode")) } hx-get={ templ.URL(mcpTabHref("opencode")) } hx-target="#mcp-setup" hx-swap="outerHTML" class={ mcpTabGhostClass }>OPENCODE</a>
+			}
+			if active == "codex" {
+				<a href={ templ.URL(mcpTabHref("codex")) } hx-get={ templ.URL(mcpTabHref("codex")) } hx-target="#mcp-setup" hx-swap="outerHTML" class={ mcpTabActiveClass }>CODEX</a>
+			} else {
+				<a href={ templ.URL(mcpTabHref("codex")) } hx-get={ templ.URL(mcpTabHref("codex")) } hx-target="#mcp-setup" hx-swap="outerHTML" class={ mcpTabGhostClass }>CODEX</a>
+			}
+			if active == "cursor" {
+				<a href={ templ.URL(mcpTabHref("cursor")) } hx-get={ templ.URL(mcpTabHref("cursor")) } hx-target="#mcp-setup" hx-swap="outerHTML" class={ mcpTabActiveClass }>CURSOR</a>
+			} else {
+				<a href={ templ.URL(mcpTabHref("cursor")) } hx-get={ templ.URL(mcpTabHref("cursor")) } hx-target="#mcp-setup" hx-swap="outerHTML" class={ mcpTabGhostClass }>CURSOR</a>
+			}
+		</div>
+		<div class="relative mt-5 w-full">
+			<pre id="mcp-snippet" class="w-full min-h-[12rem] text-left font-mono text-[11px] leading-relaxed text-gray-300 bg-[rgba(20,16,43,0.35)] border border-dashed border-[#2c2350] rounded-2xl p-5 pr-28 overflow-x-auto">@templ.Raw(mcpSnippetFor(active))</pre>
+			<button onclick="copyMcpSnippet()" class="absolute top-3 right-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full font-mono text-[10px] tracking-[0.14em] text-[#e5e1ff] border border-[#2c2350] bg-[#0d0a1e] hover:border-[#4c2d8f] hover:text-pink-400 transition-colors"><span id="mcp-copy-label">COPY</span></button>
+		</div>
+	</div>
+}

@@ -20,6 +20,13 @@ var safeKeyPattern = regexp.MustCompile(`[^a-zA-Z0-9_]`)
 // to materialise vars.tf.json and env_resolved.tf.json. The base .tf.json files
 // reference these via "${var.*}" / "${local.env_vars}".
 type TfGenParams struct {
+	// Provider selects which cloud's stack is generated. Its zero value is AWS
+	// (the Provider enum's first entry), so callers that leave it unset get the
+	// AWS stack unchanged.
+	Provider config.Provider
+	// GcpProject is the GCP project ID the GCP stack deploys into (the google
+	// provider's project argument). AWS stacks ignore it.
+	GcpProject    string
 	ProjectName   string
 	Stage         string
 	Suffix        string
@@ -91,6 +98,13 @@ func (g *Generator) Prepare(workDir string, params TfGenParams) error {
 		return fmt.Errorf("create work dir %q: %w", workDir, err)
 	}
 
+	// The GCP stack shares the working-dir contract (same file set, same
+	// local.gothic_* output names) but embeds its own provider/backend and
+	// resource files, and has no CloudFront cache policy.
+	if params.Provider == config.GCP {
+		return g.prepareGcp(workDir, params)
+	}
+
 	if err := g.writeEmbeddedBase(workDir); err != nil {
 		return err
 	}
@@ -115,12 +129,84 @@ func (g *Generator) Prepare(workDir string, params TfGenParams) error {
 	return nil
 }
 
+// prepareGcp writes the complete GCP OpenTofu working directory: the embedded
+// gcp base files (provider/gcs backend, variables, outputs), the dynamic
+// resources.tf.json (Cloud Run + GCS + optional domain mapping), the resolved
+// env/domain locals, and the gothic_outputs.tf.json infra contract.
+func (g *Generator) prepareGcp(workDir string, params TfGenParams) error {
+	if params.Region == "" {
+		return fmt.Errorf("stage %q: GCP region not set — set Deploy.Providers.GCP.Region in gothic.config.go", params.Stage)
+	}
+
+	if err := g.writeEmbeddedBaseFrom(workDir, "embedded/gcp"); err != nil {
+		return err
+	}
+	enableDomainMapping := params.CustomDomain != nil
+	if err := g.writeGcpVars(workDir, params, enableDomainMapping); err != nil {
+		return err
+	}
+	if err := g.writeGcpEnvResolved(workDir, params); err != nil {
+		return err
+	}
+	if err := WriteGcpResources(workDir, params); err != nil {
+		return err
+	}
+	if err := WriteGcpOutputs(workDir); err != nil {
+		return err
+	}
+	// User infra is merged LAST so the collision guard sees the full set of
+	// Gothic-generated files already in place.
+	return g.mergeUserInfra(workDir, params.InfraDir)
+}
+
+// writeGcpVars builds gothic_vars.auto.tfvars.json for GCP: the plan-time
+// enable_domain_mapping boolean (which gates the domain mapping's count) plus
+// the concrete resource-name values.
+func (g *Generator) writeGcpVars(workDir string, params TfGenParams, enableDomainMapping bool) error {
+	values := map[string]any{
+		"project_name": params.ProjectName,
+		"stage":        params.Stage,
+		"suffix":       params.Suffix,
+		"region":       params.Region,
+		"project":      params.GcpProject,
+		"service_name": params.LambdaName,
+		"bucket_name":  params.BucketName,
+		"state_bucket": params.StateBucket,
+		// gcp_image_uri is intentionally NOT here — it is only known after the
+		// image is built+pushed, so Deploy writes gothic_image.auto.tfvars.json
+		// with it after Build. Its variable defaults to "" for init/validate.
+		"enable_domain_mapping": enableDomainMapping,
+	}
+	return writeJSON(filepath.Join(workDir, "gothic_vars.auto.tfvars.json"), values)
+}
+
+// writeGcpEnvResolved builds env_resolved.tf.json for GCP: the locals.env_vars
+// map (raw values only — SSM/Secrets Manager sources are rejected) plus the
+// custom_domain local. A `"data": {}` block is invalid config, and GCP
+// resolution emits no data sources today, so no data block is ever written.
+func (g *Generator) writeGcpEnvResolved(workDir string, params TfGenParams) error {
+	localEnv, err := GcpEnvLocals(params.EnvVars)
+	if err != nil {
+		return err
+	}
+	domain, err := GcpDomainLocal(params.CustomDomain)
+	if err != nil {
+		return err
+	}
+	locals := map[string]any{
+		"env_vars":      localEnv,
+		"custom_domain": domain,
+	}
+	return writeJSON(filepath.Join(workDir, "env_resolved.tf.json"), map[string]any{"locals": locals})
+}
+
 // writeGothicOutputs writes gothic_outputs.tf.json: a `locals` block re-exporting
 // the Gothic stack's key resource attributes under STABLE `gothic_*` names. This
 // is the public contract user infra/ files build against (e.g. attaching an IAM
 // policy to the Gothic Lambda role, or granting it access to a new table) — it
 // decouples them from Gothic's internal resource addresses, which may change.
-// Every reference is verified against embedded/aws/resources.tf.json.
+// Every reference is verified against embedded/aws/resources.tf.json. GCP stacks
+// have their own contract (see WriteGcpOutputs, wired by prepareGcp).
 func (g *Generator) writeGothicOutputs(workDir string) error {
 	locals := map[string]any{
 		"gothic_lambda_role_name":           "${aws_iam_role.lambda.name}",
@@ -274,7 +360,12 @@ func isTofuFile(name string) bool {
 // writeEmbeddedBase copies every embedded base file under embedded/aws/ into
 // workDir using a flat layout (base name only).
 func (g *Generator) writeEmbeddedBase(workDir string) error {
-	const root = "embedded/aws"
+	return g.writeEmbeddedBaseFrom(workDir, "embedded/aws")
+}
+
+// writeEmbeddedBaseFrom copies every embedded base file under root into workDir
+// using a flat layout (base name only).
+func (g *Generator) writeEmbeddedBaseFrom(workDir, root string) error {
 	return fs.WalkDir(TofuTemplateFS, root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err

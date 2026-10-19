@@ -20,7 +20,7 @@ func {{.MainServerFunctionName}} {
 	router.Use(middlewares.Logger())
 
 	// Gothic's runtime as one chi middleware: caching, /public/* static serving, the
-	// OptimizedImage endpoint and every built-in route feature — all driven by the
+	// OptimizedImage endpoint and every built-in route feature: all driven by the
 	// Runtime block in gothic.config.go. New features arrive here automatically; you
 	// never edit main.go. Tune the behavior (cache backend, static serving) there.
 	router.Use(middlewares.Middleware(Config.Runtime))

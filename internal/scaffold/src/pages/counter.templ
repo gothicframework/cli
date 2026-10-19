@@ -30,18 +30,62 @@ var CounterConfig = routes.RouteConfig[CounterPageProps]{
 			SetText("counter-value", strconv.Itoa(count.Get()))
 		}, count)
 
+		Observe(func() {
+			SetText("counter-mirror", strconv.Itoa(count.Get()))
+		}, count)
+
 		CreateWasmFunc("increment", func() {
 			count.Set(count.Get() + 1)
+		})
+
+		CreateWasmFunc("reset", func() {
+			count.Set(0)
 		})
 	},
 }
 
+
 templ Counter(props CounterPageProps) {
-	@layouts.PageLayout() {
-		<div class="flex flex-col items-center justify-center gap-8 w-full max-w-xl text-center">
-			<h1 class="text-white text-3xl font-bold">WASM Counter</h1>
-			<p id="counter-value" class="text-cyan-400 text-6xl font-mono font-bold">0</p>
-			<button onclick="increment()" class="bg-purple-600 hover:bg-purple-400 text-white font-bold text-2xl w-16 h-16 rounded-full">+</button>
+	@layouts.PageLayout(true) {
+		<section class="text-center pt-12 pb-8 max-w-xl">
+			<div class="font-mono text-[10px] tracking-[0.32em] text-pink-400 uppercase">FEATURE 01 · STATE IN GO</div>
+			<h1 class="mt-2 text-3xl sm:text-4xl font-extrabold">Reactive UI compiled to WebAssembly</h1>
+			<p class="mt-3 text-gray-400 text-sm sm:text-base max-w-md mx-auto leading-relaxed">
+				This counter is not written in JavaScript: the reactivity is <strong class="text-blue-300">Go</strong>, compiled to <strong class="text-blue-300">WebAssembly</strong> in your browser. The mirror beside it is <strong class="text-pink-400">shared state</strong> between components, also written in Go.
+			</p>
+		</section>
+
+		<div class="mb-2">
+			<a href="/" class="inline-flex items-center justify-center px-5 py-2.5 rounded-full border border-[#2c2350] text-purple-300 font-mono text-[12px] hover:border-[#4c2d8f] hover:text-[#e9d5ff] transition-colors">← BACK TO OVERVIEW</a>
 		</div>
+
+		<section class="flex flex-wrap gap-4 justify-center pb-4 w-full max-w-2xl">
+			<div class="p-8 w-full sm:w-64 text-center rounded-2xl bg-[linear-gradient(160deg,#14102b,#0b0817)] border border-[#2c2350] shadow-[0_0_60px_rgba(124,58,237,0.10)]">
+				<div class="font-mono text-[10px] tracking-[0.28em] text-gray-500 uppercase">COUNTER</div>
+				<p id="counter-value" class="font-mono text-6xl font-bold text-blue-300 my-5">0</p>
+				<div class="flex justify-center gap-2">
+					<button onclick="increment()" class="w-11 h-11 rounded-xl bg-gradient-to-br from-purple-600 to-pink-600 text-xl font-bold hover:brightness-110 transition" aria-label="Increment counter">+</button>
+					<button onclick="reset()" class="w-11 h-11 rounded-xl border border-[#2c2350] text-purple-300 text-lg hover:border-[#4c2d8f] transition" aria-label="Reset counter">⟲</button>
+				</div>
+				<div class="mt-5 font-mono text-[10px] tracking-[0.28em] text-gray-500 uppercase">OBSERVABLE · WASM</div>
+			</div>
+			<div class="p-8 w-full sm:w-64 text-center rounded-2xl border border-dashed border-[#2c2350] bg-[rgba(20,16,43,0.35)]">
+				<div class="font-mono text-[10px] tracking-[0.28em] text-gray-500 uppercase">MIRROR</div>
+				<p id="counter-mirror" class="font-mono text-6xl font-bold text-pink-400 my-5">0</p>
+				<p class="text-[12px] text-gray-400 leading-relaxed">
+					Same state, second binding. The broadcast side lives in <span class="text-purple-300 font-mono text-[11px]">src/topics/counter_topic.go</span>
+				</p>
+				<div class="mt-5 font-mono text-[10px] tracking-[0.28em] text-gray-500 uppercase">● SAME OBSERVABLE</div>
+			</div>
+		</section>
+
+		
+
+		<section class="w-full max-w-xl pb-14 flex flex-wrap gap-2 justify-center items-center">
+			<span class="font-mono text-[10px] tracking-[0.28em] text-gray-500 uppercase">DOCS:</span>
+			<a href="https://gothicframework.com/docs/wasm-observables" target="_blank" class="inline-flex items-center font-mono text-[10px] tracking-[0.14em] text-blue-300 border border-[#2c2350] rounded-full px-3 py-1.5 hover:border-[#4c2d8f] hover:text-purple-300 transition-colors">OBSERVABLES</a>
+			<a href="https://gothicframework.com/docs/wasm-topics" target="_blank" class="inline-flex items-center font-mono text-[10px] tracking-[0.14em] text-blue-300 border border-[#2c2350] rounded-full px-3 py-1.5 hover:border-[#4c2d8f] hover:text-purple-300 transition-colors">TOPICS</a>
+			<a href="https://gothicframework.com/docs/wasm-event-handlers" target="_blank" class="inline-flex items-center font-mono text-[10px] tracking-[0.14em] text-blue-300 border border-[#2c2350] rounded-full px-3 py-1.5 hover:border-[#4c2d8f] hover:text-purple-300 transition-colors">EVENT HANDLERS</a>
+		</section>
 	}
 }

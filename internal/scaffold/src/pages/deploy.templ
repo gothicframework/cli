@@ -1,0 +1,54 @@
+package pages
+
+import (
+	components "{{.GoModName}}/src/components"
+	"{{.GoModName}}/src/layouts"
+	. "github.com/gothicframework/core/wasm"
+	"net/http"
+	routes "github.com/gothicframework/core/router"
+)
+
+type DeployPageProps = interface{}
+
+var DeployConfig = routes.RouteConfig[DeployPageProps]{
+	Type:       routes.STATIC,
+	HttpMethod: routes.GET,
+	Middleware: func(w http.ResponseWriter, r *http.Request) DeployPageProps {
+		return nil
+	},
+	WasmCompression: routes.BROTLI,
+	ClientSideState: func() {
+		CreateWasmFunc("copyDeploySnippet", func() {
+			snippet := GetElementById("deploy-snippet").Get("textContent").String()
+			WriteClipboard(snippet)
+			SetText("deploy-copy-label", "COPIED ✓")
+		})
+	},
+}
+
+
+templ Deploy(props DeployPageProps) {
+	@layouts.PageLayout(true) {
+		<section class="text-center pt-12 pb-8 max-w-xl">
+			<div class="font-mono text-[10px] tracking-[0.32em] text-pink-400 uppercase">FEATURE 06 · DEPLOY</div>
+			<h1 class="mt-2 text-3xl sm:text-4xl font-extrabold">Ship it without a DevOps team</h1>
+			<p class="mt-3 text-gray-400 text-sm sm:text-base max-w-md mx-auto leading-relaxed">
+				<strong class="text-white">One command</strong> ships it all: <strong class="text-blue-300">AWS</strong> with <strong class="text-blue-300">OpenTofu</strong> generated infrastructure, <strong class="text-blue-300">GCP</strong>, or a <strong class="text-blue-300">single binary</strong> with Docker on any VPS.
+			</p>
+		</section>
+
+		<div class="mb-2">
+			<a href="/" class="inline-flex items-center justify-center px-5 py-2.5 rounded-full border border-[#2c2350] text-purple-300 font-mono text-[12px] hover:border-[#4c2d8f] hover:text-[#e9d5ff] transition-colors">← BACK TO OVERVIEW</a>
+		</div>
+
+		<section class="w-full max-w-2xl pb-4">
+			@components.DeployTarget("aws")
+		</section>
+
+		<section class="w-full max-w-2xl pb-14 flex flex-wrap gap-2 justify-center items-center">
+			<span class="font-mono text-[10px] tracking-[0.28em] text-gray-500 uppercase">SAME PROJECT, EVERY TARGET:</span>
+			<span class="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.14em] text-[#a78bfa] border border-[#2c2350] bg-[#0d0a1e] rounded-full px-3 py-1.5"><span class="text-pink-400">●</span> ONE GOTHIC.CONFIG.GO</span>
+			<span class="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.14em] text-[#a78bfa] border border-[#2c2350] bg-[#0d0a1e] rounded-full px-3 py-1.5"><span class="text-pink-400">●</span> STAGES: DEV, STAGING, PROD</span>
+		</section>
+	}
+}

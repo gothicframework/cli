@@ -169,25 +169,35 @@ func (cli *GothicCli) GetConfig() (Config, error) {
 	// AWS config (shared profile + region) is loaded once here so deploy-time
 	// code paths need not reload it.
 	if config.Deploy != nil && NewDeploymentEngine != nil && NewCDNEngine != nil {
-		// v3 ships AWS only. Reject any other provider up front rather than
-		// silently building an AWS engine for a GCP/Azure config.
-		if config.Deploy.Provider != AWS {
-			return Config{}, fmt.Errorf("deploy provider not supported yet: only AWS is available in v3")
+		switch config.Deploy.Provider {
+		case GCP:
+			// GCP uses ADC (application-default credentials) + gcloud: there
+			// is no AWS-style shared config to load, so the awsCfg argument
+			// stays nil. gcloud presence is checked at deploy time.
+			engine, err := NewDeploymentEngine(cli.config, nil)
+			if err != nil {
+				return Config{}, fmt.Errorf("constructing deployment engine: %w", err)
+			}
+			cli.Engine = engine
+			cli.CDN = NewCDNEngine(cli.config, nil)
+		case AWS:
+			aws := config.Deploy.Providers.AWS
+			awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(),
+				awsconfig.WithRegion(aws.Region),
+				awsconfig.WithSharedConfigProfile(aws.Profile),
+			)
+			if err != nil {
+				return Config{}, fmt.Errorf("loading AWS config: %w", err)
+			}
+			engine, err := NewDeploymentEngine(cli.config, awsCfg)
+			if err != nil {
+				return Config{}, fmt.Errorf("constructing deployment engine: %w", err)
+			}
+			cli.Engine = engine
+			cli.CDN = NewCDNEngine(cli.config, awsCfg)
+		default:
+			return Config{}, fmt.Errorf("deploy provider not supported yet: only AWS and GCP are available")
 		}
-		aws := config.Deploy.Providers.AWS
-		awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(),
-			awsconfig.WithRegion(aws.Region),
-			awsconfig.WithSharedConfigProfile(aws.Profile),
-		)
-		if err != nil {
-			return Config{}, fmt.Errorf("loading AWS config: %w", err)
-		}
-		engine, err := NewDeploymentEngine(cli.config, awsCfg)
-		if err != nil {
-			return Config{}, fmt.Errorf("constructing deployment engine: %w", err)
-		}
-		cli.Engine = engine
-		cli.CDN = NewCDNEngine(cli.config, awsCfg)
 	}
 	return config, nil
 }

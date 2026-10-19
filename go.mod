@@ -17,7 +17,7 @@ require (
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-rod/rod v0.116.2
 	github.com/gothicframework/components v1.3.0
-	github.com/gothicframework/core v1.6.1-beta.1
+	github.com/gothicframework/core v1.6.1-beta.2
 	github.com/hashicorp/terraform-exec v0.25.2
 	github.com/joho/godotenv v1.5.1
 	github.com/modelcontextprotocol/go-sdk v1.7.0

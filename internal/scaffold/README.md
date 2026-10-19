@@ -1,11 +1,11 @@
 ## Gothic Framework
 
-**Gothic Framework** is a developer-first toolset built to help you craft fast, scalable, and modern web applications using the **GOTTH stack**:  
+A web framework made in Go. Fast, responsive, agent friendly. Minimal JavaScript, Tailwind styling, and simple deploys on AWS, GCP, or your own server.
+
+**Gothic Framework** is a developer-first toolset for the **GOTTH stack**:  
 **Golang**, **TailwindCSS**, **Templ**, and **HTMX**.
 
-Inspired by frameworks like **Next.js**, Gothic Framework brings powerful full-stack features to Go developers — including edge-ready architecture, SEO enhancements, and a fantastic development experience (DX).
-
-This project is configured via `gothic.config.go` and deploys to AWS with **OpenTofu** (the OpenTofu binary is downloaded automatically on first deploy). Deploys require **Go 1.23+**, a running **Docker daemon**, and **AWS credentials**.
+The project is configured via `gothic.config.go` and deploys through the CLI: AWS with **OpenTofu** (the OpenTofu binary is downloaded automatically on first deploy), GCP (beta, shipped with the CLI), or your own server. Deploys require **Go 1.23+** and a running **Docker daemon**; AWS additionally requires **AWS credentials**.
 
 See the [top-level README](https://github.com/gothicframework/core/blob/main/README.md) for configuration, lifecycle hooks, and deployment details.
 
@@ -27,7 +27,7 @@ Point your MCP client at that URL while `gothic hot-reload` is running:
 claude mcp add --transport http gothic-dev http://127.0.0.1:3000/_gothicframework/mcp
 ```
 
-**OpenCode** — add to `opencode.json` (project or `~/.config/opencode/opencode.json`):
+**OpenCode**: add to `opencode.json` (project or `~/.config/opencode/opencode.json`):
 
 ```json
 {
@@ -43,14 +43,14 @@ claude mcp add --transport http gothic-dev http://127.0.0.1:3000/_gothicframewor
 }
 ```
 
-**Codex** — add to `~/.codex/config.toml`:
+**Codex**: add to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.gothic-dev]
 url = "http://127.0.0.1:3000/_gothicframework/mcp"
 ```
 
-**Cursor** — add to `.cursor/mcp.json`:
+**Cursor**: add to `.cursor/mcp.json`:
 
 ```json
 {
@@ -62,7 +62,7 @@ url = "http://127.0.0.1:3000/_gothicframework/mcp"
 }
 ```
 
-**Pi** — Pi connects to MCP through its extension ecosystem:
+**Pi**: Pi connects to MCP through its extension ecosystem:
 
 ```bash
 pi install npm:pi-mcp-extension

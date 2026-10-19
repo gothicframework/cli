@@ -65,14 +65,16 @@ type GothicCliData struct {
 
 var DefaultCLIData = GothicCliData{
 	PublicFolderAssets: map[string]embed.FS{
-		"public/imageExample/blurred.png":  publicFolder,
-		"public/imageExample/original.png": publicFolder,
-		"public/favicon.ico":               publicFolder,
-		"public/styles.css":                publicFolder,
+		"public/imageExample/blurred.png":    publicFolder,
+		"public/imageExample/original.png":   publicFolder,
+		"public/imageKeyboard/blurred.webp":  publicFolder,
+		"public/imageKeyboard/original.webp": publicFolder,
+		"public/favicon.ico":                 publicFolder,
+		"public/styles.css":                  publicFolder,
 	},
 	// TemplateFiles are seeded onto the user's disk at `gothic init` time so
 	// they can be customised per-project. WASM-related templates and the
-	// routes_gen generator template are NOT in this list — they ship inside
+	// routes_gen generator template are NOT in this list: they ship inside
 	// the CLI binary's embed.FS as of v2.17 because they are implementation
 	// details users should not edit (and historic on-disk drift was a
 	// recurring source of silent breakage). See pkg/helpers/wasm/wasm_templates.go
@@ -85,6 +87,11 @@ var DefaultCLIData = GothicCliData{
 		"src/pages/index.templ":      srcFolder,
 		"src/pages/revalidate.templ": srcFolder,
 		"src/pages/counter.templ":    srcFolder,
+		"src/pages/htmx.templ":       srcFolder,
+		"src/pages/images.templ":     srcFolder,
+		"src/pages/mcp.templ":        srcFolder,
+		"src/pages/deploy.templ":     srcFolder,
+		"src/pages/preload.templ":    srcFolder,
 		"src/pages/counter_templ.go": srcFolder,
 		// topic files
 		"src/topics/counter_topic.go": srcFolder,
@@ -93,8 +100,11 @@ var DefaultCLIData = GothicCliData{
 		// css files
 		"src/css/app.css": srcFolder,
 		// component files
-		"src/components/helloWorld.templ": srcFolder,
-		"src/components/lazyLoad.templ":   srcFolder,
+		"src/components/helloWorld.templ":   srcFolder,
+		"src/components/lazyLoad.templ":     srcFolder,
+		"src/components/imageDemo.templ":    srcFolder,
+		"src/components/mcpSetup.templ":     srcFolder,
+		"src/components/deployTarget.templ": srcFolder,
 		// api files
 		"src/api/helloWorld.go": srcFolder,
 		// root files
@@ -109,6 +119,7 @@ var DefaultCLIData = GothicCliData{
 		"optimize",
 		// Public Dirs
 		"public/imageExample",
+		"public/imageKeyboard",
 		// Src Dirs
 		"src/api",
 		"src/components",
@@ -129,10 +140,18 @@ var DefaultCLIData = GothicCliData{
 		"src/pages/revalidate.templ": "Revalidate",
 		"src/pages/index.templ":      "Index",
 		"src/pages/counter.templ":    "Counter",
+		"src/pages/htmx.templ":       "Htmx",
+		"src/pages/images.templ":     "Images",
+		"src/pages/mcp.templ":        "Mcp",
+		"src/pages/deploy.templ":     "Deploy",
+		"src/pages/preload.templ":    "Preload",
 	},
 	CustomTemplateBasedComponents: map[string]string{
-		"src/components/helloWorld.templ": "HelloWorld",
-		"src/components/lazyLoad.templ":   "LazyLoad",
+		"src/components/helloWorld.templ":   "HelloWorld",
+		"src/components/lazyLoad.templ":     "LazyLoad",
+		"src/components/imageDemo.templ":    "ImageDemo",
+		"src/components/mcpSetup.templ":     "McpSetup",
+		"src/components/deployTarget.templ": "DeployTarget",
 	},
 	CustomTemplateBasedRoutes: map[string]string{
 		"src/api/helloWorld.go": "HelloWorld",
