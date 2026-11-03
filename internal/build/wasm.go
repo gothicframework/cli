@@ -16,10 +16,11 @@ type wasmBuildCounts struct {
 }
 
 // tinyGoVersion is the default TinyGo toolchain (overridable via
-// WasmTinyGoVersion). TinyGo 0.42.0 includes the syscall/js finalizers,
-// idle-point finalizer-pressure GC, asyncify stack cleanup, and per-block
-// registration bitmap from upstream PR #5545.
-const tinyGoVersion = "0.42.0"
+// WasmTinyGoVersion). 0.43.0 moved the runtime to precise GC layouts and precise
+// global scanning, which cuts component heap and raises throughput. 0.44.0 is
+// not pinned yet: it retains one Fetch response buffer per Fetch+HTMX re-mount in
+// the leak gate, so the toolchain stays on 0.43.0 until that is understood.
+const tinyGoVersion = "0.43.0"
 const binaryenVersion = "117"
 
 // ResolveTinyGoVersion returns the effective TinyGo toolchain version for a

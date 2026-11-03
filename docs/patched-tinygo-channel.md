@@ -1,10 +1,12 @@
 # The patched-TinyGo channel
 
 Gothic compiles client-side WASM with a pinned, managed TinyGo toolchain. The
-default is official **TinyGo `0.42.0`**, downloaded from
-`github.com/tinygo-org/tinygo/releases`. It contains upstream PR #5545: real
-`syscall/js` finalizers, finalizer-pressure collection at scheduler idle points,
-finished asyncify stack and argument cleanup, and the per-block finalizer bitmap.
+default is official **TinyGo `0.43.0`**, downloaded from
+`github.com/tinygo-org/tinygo/releases`. It contains the upstream runtime work
+Gothic depends on: real `syscall/js` finalizers, finalizer-pressure collection
+at scheduler idle points, finished asyncify stack and argument cleanup, and the
+per-block finalizer bitmap (all from 0.42.0), plus the precise GC layouts and
+precise global scanning added in 0.43.0.
 
 The patched channel remains available for a future fix that Gothic needs before
 an official TinyGo release contains it. This document describes how a
@@ -100,6 +102,38 @@ TinyGo PR #5545 merged on 2026-08-26 and shipped in official TinyGo `0.42.0` on
 
 Gothic therefore uses `0.42.0` as its managed default. The `-gothic.*` routing
 code remains dormant for future upstream gaps.
+
+## TinyGo 0.43.0 migration
+
+0.43.0 moved the runtime to precise GC layouts and precise global scanning on
+every platform. Gothic already compiles the core and every component with
+`-gc precise`, so the bump needs no flag change: it is the bare version pin, a
+fresh toolchain download, and a full gate run on artifacts rebuilt with it. The
+pre-flight gate below is the acceptance check.
+
+Measured against 0.42.0 on the release gate, 0.43.0 keeps every leak and timing
+test green while cutting component heap sharply (for example the large-payload
+Fetch spec went from a 48 MB high-water to 4 MB) and roughly doubling combined
+topic/mux throughput with no change in application code.
+
+## Why 0.44.0 is not pinned
+
+0.44.0 passes the functional suite but fails `stress-fetch-htmx-remount-leak`
+deterministically: one `Uint8Array` survives per Fetch+HTMX re-mount even after
+an explicit `HeapProfiler.collectGarbage` (20 over 20 re-mounts; the budget is
+8, and 0.42.0/0.43.0 both measure 0). A 50-re-mount ramp measured 50 retained
+buffers, so the growth is linear, not a plateau.
+
+The cause is upstream PR #5930 ("scan only the live part of asyncify stacks"):
+it keeps every task with a heap stack on a list until it exits, so a goroutine
+blocked after its component's teardown stays on that list and its stack keeps
+being scanned. Dead locals in that stack — including the Fetch response buffer —
+become roots. Reverting the change in the 0.44.0 runtime removes the leak (Δ0
+over 50 re-mounts). Upstream tracks the regression in PR #6041, still open, and
+`dev` matches 0.44.0 in these files, so no release carries the fix yet.
+
+0.44.0's throughput and heap numbers match 0.43.0 within noise, so the pin stays
+on 0.43.0 until #6041 lands.
 
 ## Pre-flight gate
 

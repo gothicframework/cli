@@ -13,7 +13,7 @@ func TestTinyGoReleaseBaseURL_RoutesPatchedToFork(t *testing.T) {
 	}{
 		// Official pins → upstream.
 		{"0.41.1", tinyGoUpstreamReleases},
-		{"0.42.0", tinyGoUpstreamReleases},
+		{"0.43.0", tinyGoUpstreamReleases},
 		{"1.0.0", tinyGoUpstreamReleases},
 		// Patched pins → fork.
 		{"0.41.1-gothic.1", tinyGoForkReleases},
@@ -34,8 +34,8 @@ func TestTinyGoReleaseBaseURL_RoutesPatchedToFork(t *testing.T) {
 }
 
 func TestDefaultTinyGoVersionUsesOfficialRelease(t *testing.T) {
-	if got := ResolveTinyGoVersion(""); got != "0.42.0" {
-		t.Fatalf("ResolveTinyGoVersion(\"\") = %q, want %q", got, "0.42.0")
+	if got := ResolveTinyGoVersion(""); got != "0.43.0" {
+		t.Fatalf("ResolveTinyGoVersion(\"\") = %q, want %q", got, "0.43.0")
 	}
 	if got := tinyGoReleaseBaseURL(ResolveTinyGoVersion("")); got != tinyGoUpstreamReleases {
 		t.Fatalf("default TinyGo release base = %q, want upstream %q", got, tinyGoUpstreamReleases)
