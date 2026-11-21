@@ -6,7 +6,7 @@
 > fresh `gothic init` + `gothic wasm` scaffold on Go 1.27.3, hot-reload boot,
 > and the full chromium gate (191/191). Release = tag + install; the rest of
 > this document is the runbook.
-> Written 2026-11-21 after a full diagnosis during a family-finances session
+> Written 2026-11-21 after a full diagnosis session
 > (reproduced on clean projects, root cause named, workaround verified).
 
 ## TL;DR
